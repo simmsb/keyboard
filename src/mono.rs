@@ -27,6 +27,8 @@ use nrf52840_hal::pac::{timer0, TIMER0, TIMER1, TIMER2};
 use rtic::Monotonic;
 
 pub struct MonoTimer<T: Instance32>(T);
+pub type Instant = fugit::TimerInstantU32<1_000_000>;
+pub type Duration = fugit::TimerDurationU32<1_000_000>;
 
 impl<T: Instance32> MonoTimer<T> {
     pub fn new(timer: T) -> Self {
@@ -37,8 +39,8 @@ impl<T: Instance32> MonoTimer<T> {
 }
 
 impl<T: Instance32> Monotonic for MonoTimer<T> {
-    type Instant = fugit::TimerInstantU32<1_000_000>;
-    type Duration = fugit::TimerDurationU32<1_000_000>;
+    type Instant = Instant;
+    type Duration = Duration;
 
     unsafe fn reset(&mut self) {
         self.0.intenset.modify(|_, w| w.compare0().set());

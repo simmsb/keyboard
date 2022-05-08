@@ -3,15 +3,17 @@
 
 use keyboard_thing as _;
 
-#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0])]
+#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
 mod app {
     use embedded_hal::timer::CountDown;
+    use fugit::ExtU32;
     use keyberon::debounce::Debouncer;
     use keyberon::hid::HidClass;
     use keyberon::keyboard::Keyboard;
     use keyberon::layout::Layout;
     use keyberon::matrix::Matrix;
-    use keyboard_thing::messages::{EventReader, SubToDom};
+    use keyboard_thing::leds::Leds;
+    use keyboard_thing::messages::{DomToSub, EventReader, EventSender, SubToDom};
     use keyboard_thing::mono::MonoTimer;
     use nrf52840_hal::clocks::{ExternalOscillator, Internal, LfOscStopped};
     use nrf52840_hal::gpio::{Input, Output, Pin, PullUp, PushPull};
@@ -41,6 +43,8 @@ mod app {
         debouncer: Debouncer<[[bool; 6]; 4]>,
         other_side_events: EventReader<SubToDom, nrf52840_hal::pac::UARTE0>,
         other_side_queue: heapless::spsc::Queue<SubToDom, 8>,
+        event_sender: EventSender<DomToSub, nrf52840_hal::pac::UARTE0>,
+        leds: Leds,
     }
 
     #[init]
@@ -116,6 +120,8 @@ mod app {
         static mut UARTE_RX: [u8; 1] = [0; 1];
         let (uarte_tx, uarte_rx) = unsafe { uarte.split(&mut UARTE_TX, &mut UARTE_RX).unwrap() };
 
+        let event_sender = EventSender::<DomToSub, _>::new(uarte_tx);
+
         let other_side_queue = heapless::spsc::Queue::new();
         let other_side_events = EventReader::new(uarte_rx);
 
@@ -123,12 +129,15 @@ mod app {
         tick_timer.enable_interrupt();
         tick_timer.start(Timer::<TIMER1, Periodic>::TICKS_PER_SECOND / 1000);
 
+        let leds = Leds::new(ctx.device.PWM0, gpios_p0.p0_06.degrade());
+
         let shared = Shared {
             layout,
             usb_hid_class,
         };
 
         let local = Local {
+            leds,
             usb_dev,
             tick_timer,
             serial,
@@ -136,6 +145,7 @@ mod app {
             debouncer,
             other_side_queue,
             other_side_events,
+            event_sender,
         };
 
         (shared, local, init::Monotonics(mono))
@@ -184,11 +194,22 @@ mod app {
         let _ = ctx.local.tick_timer.wait();
 
         for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
-            // TODO: rhs
             handle_keyberon_event::spawn(event).unwrap();
         }
 
         tick_keyberon::spawn().unwrap();
+    }
+
+    #[task(local = [cnt: u8 = 0, leds])]
+    fn led_tick(ctx: led_tick::Context, instant: keyboard_thing::mono::Instant) {
+        *ctx.local.cnt += 1;
+
+        ctx.local
+            .leds
+            .send(keyboard_thing::leds::rainbow(*ctx.local.cnt));
+
+        let next_instant = instant + 16.millis();
+        led_tick::spawn_at(next_instant, next_instant).unwrap();
     }
 
     #[idle(local = [usb_dev, serial], shared = [usb_hid_class])]
@@ -203,7 +224,9 @@ mod app {
 
                     match ctx.local.serial.read(&mut buf[..]) {
                         Ok(c) => {
+                            let _ = ctx.local.serial.write(b"cock: ");
                             let _ = ctx.local.serial.write(&buf[..c]);
+                            let _ = ctx.local.serial.write(b"\r\n");
                         }
                         Err(UsbError::WouldBlock) => {}
                         Err(e) => {

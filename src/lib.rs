@@ -5,6 +5,7 @@ pub mod mono;
 pub mod layout;
 pub mod matrix;
 pub mod messages;
+pub mod leds;
 
 use nrf52840_hal as _;
 
