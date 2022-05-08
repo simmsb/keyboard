@@ -1,14 +1,30 @@
 #![no_main]
 #![no_std]
 
-use defmt_rtt as _; // global logger
+pub mod mono;
+pub mod layout;
+pub mod matrix;
+pub mod messages;
 
 use nrf52840_hal as _;
 
+#[cfg(feature = "debugger")]
+use defmt_rtt as _; // global logger
+#[cfg(feature = "debugger")]
 use panic_probe as _;
+
+#[cfg(not(feature = "debugger"))]
+mod defmt_noop;
+
+#[cfg(not(feature = "debugger"))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    cortex_m::asm::udf()
+}
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
+#[cfg(feature = "debugger")]
 #[defmt::panic_handler]
 fn panic() -> ! {
     cortex_m::asm::udf()

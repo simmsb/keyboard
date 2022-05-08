@@ -15,13 +15,29 @@ harness = false
 [dependencies]
 cortex-m = "0.7.3"
 cortex-m-rt = "0.7.0"
+cortex-m-rtic = "1.0.0"
 defmt = "0.3.0"
-defmt-rtt = "0.3.0"
-nrf52840-hal = "0.15.0"
-panic-probe = { version = "0.3.0", features = ["print-defmt"] }
+defmt-rtt = { version = "0.3.0", optional = true }
+embedded-hal = "0.2.7"
+fugit = "0.3.5"
+heapless = "0.7.10"
+keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
+nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
+nrf52840-hal = { version = "0.15.0", features = ["rt"] }
+panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
+postcard = "0.7.3"
+rtic-monotonic = "1.0.0"
+serde = { version = "1.0.137", features = ["derive"], default-features = false }
+smart-leds = "0.3.0"
+usb-device = "0.2.8"
+usbd-serial = "0.1.1"
 
 [dev-dependencies]
 defmt-test = "0.3.0"
+
+[features]
+default = []
+debugger = ["defmt-rtt", "panic-probe"]
 
 # cargo build/run
 [profile.dev]
