@@ -47,6 +47,7 @@ impl<T: Serialize, UT: Instance> EventSender<T, UT> {
                 .ok()?;
 
         self.tx.bwrite_all(buf).ok()?;
+        self.tx.bflush().ok()?;
 
         Some(())
     }

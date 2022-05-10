@@ -13,14 +13,14 @@ name = "integration"
 harness = false
 
 [dependencies]
-cortex-m = "0.7.3"
-cortex-m-rt = "0.7.0"
-cortex-m-rtic = "1.0.0"
-defmt = "0.3.0"
-defmt-rtt = { version = "0.3.0", optional = true }
+cortex-m = { version = "0.7.4", features = ["linker-plugin-lto"] }
+cortex-m-rt = "0.7.1"
+cortex-m-rtic = "1.1.2"
+defmt = "0.3.1"
+defmt-rtt = { version = "0.3.2", optional = true }
 embedded-hal = "0.2.7"
 fugit = "0.3.5"
-heapless = "0.7.10"
+heapless = "0.7.11"
 keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
 nrf52840-hal = { version = "0.15.0", features = ["rt"] }
@@ -66,7 +66,7 @@ incremental = false
 # NOTE disabled to work around issue rust-lang/rust#90357
 # the bug results in log messages not having location information
 # (the line printed below the log message that contains the file-line location)
-# lto = 'fat'
+lto = 'fat'
 opt-level = 3 # <-
 overflow-checks = false # <-
 

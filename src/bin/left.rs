@@ -110,13 +110,17 @@ mod app {
             cts: None,
             rts: None,
         };
+
+        // TODO: do we need this
+        ctx.device.UARTE0.intenset.modify(|_, w| w.endrx().set_bit());
+
         let uarte = Uarte::new(
             ctx.device.UARTE0,
             uarte_pins,
             uarte::Parity::EXCLUDED,
             uarte::Baudrate::BAUD115200,
         );
-        static mut UARTE_TX: [u8; 32] = [0; 32];
+        static mut UARTE_TX: [u8; 1] = [0; 1];
         static mut UARTE_RX: [u8; 1] = [0; 1];
         let (uarte_tx, uarte_rx) = unsafe { uarte.split(&mut UARTE_TX, &mut UARTE_RX).unwrap() };
 
@@ -130,6 +134,8 @@ mod app {
         tick_timer.start(Timer::<TIMER1, Periodic>::TICKS_PER_SECOND / 1000);
 
         let leds = Leds::new(ctx.device.PWM0, gpios_p0.p0_06.degrade());
+
+        rtic::pend(nrf52840_hal::pac::Interrupt::UARTE0_UART0);
 
         let shared = Shared {
             layout,
