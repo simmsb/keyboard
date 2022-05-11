@@ -3,8 +3,10 @@
 
 use keyboard_thing as _;
 
-#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0])]
+#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
 mod app {
+    use core::sync::atomic::AtomicU16;
+
     use embedded_hal::timer::CountDown;
     use fugit::ExtU32;
     use keyberon::debounce::Debouncer;
@@ -19,6 +21,8 @@ mod app {
 
     #[monotonic(binds = TIMER0, default = true)]
     type Mono = MonoTimer<TIMER0>;
+
+    static LED_CNT: AtomicU16 = AtomicU16::new(0);
 
     #[shared]
     struct Shared {}
@@ -58,13 +62,16 @@ mod app {
         };
 
         // TODO: do we need this
-        ctx.device.UARTE0.intenset.modify(|_, w| w.endrx().set_bit());
+        ctx.device
+            .UARTE0
+            .intenset
+            .modify(|_, w| w.endrx().set_bit());
 
         let uarte = Uarte::new(
             ctx.device.UARTE0,
             uarte_pins,
             uarte::Parity::EXCLUDED,
-            uarte::Baudrate::BAUD115200,
+            uarte::Baudrate::BAUD1M,
         );
         static mut UARTE_TX: [u8; 1] = [0; 1];
         static mut UARTE_RX: [u8; 1] = [0; 1];
@@ -80,6 +87,7 @@ mod app {
         tick_timer.start(Timer::<TIMER1, Periodic>::TICKS_PER_SECOND / 1000);
 
         let leds = Leds::new(ctx.device.PWM0, gpios_p0.p0_06.degrade());
+        let _ = led_tick::spawn_after(100.millis());
 
         rtic::pend(nrf52840_hal::pac::Interrupt::UARTE0_UART0);
 
@@ -98,36 +106,49 @@ mod app {
         (shared, local, init::Monotonics(mono))
     }
 
-    #[task(binds = UARTE0_UART0, priority = 4, local = [other_side_queue, other_side_events])]
-    fn rx_other_side(ctx: rx_other_side::Context) {
-        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-        while let Some(_evt) = ctx.local.other_side_queue.dequeue() {}
+    // #[task(binds = UARTE0_UART0, priority = 4, local = [other_side_queue, other_side_events])]
+    // fn rx_other_side(ctx: rx_other_side::Context) {
+    // }
+
+    #[task(capacity = 8)]
+    fn handle_event(_ctx: handle_event::Context, event: DomToSub) {
+        match event {
+            DomToSub::ResyncLeds => LED_CNT.store(0, core::sync::atomic::Ordering::SeqCst),
+        }
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, event_sender])]
+    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, event_sender, other_side_queue, other_side_events])]
     fn tick(ctx: tick::Context) {
         let _ = ctx.local.tick_timer.wait();
 
+        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
+        while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+            let _ = handle_event::spawn(evt);
+        }
+
         for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
             let msg = match event {
-                keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, y),
-                keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, y),
+                keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, 11 - y),
+                keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, 11 - y),
             };
 
             ctx.local.event_sender.send(&msg);
         }
     }
 
-    #[task(local = [cnt: u8 = 0, leds])]
-    fn led_tick(ctx: led_tick::Context, instant: keyboard_thing::mono::Instant) {
-        *ctx.local.cnt += 1;
+    #[task(priority = 1, local = [leds])]
+    fn led_tick(ctx: led_tick::Context) {
+        let led_cnt = LED_CNT.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
-        ctx.local
-            .leds
-            .send(keyboard_thing::leds::rainbow(*ctx.local.cnt));
+        critical_section::with(|_| {
+            ctx.local
+                .leds
+                .send(keyboard_thing::leds::rainbow(led_cnt as u8));
+        });
 
-        let next_instant = instant + 16.millis();
-        led_tick::spawn_at(next_instant, next_instant).unwrap();
+        let fps = 30;
+        let fps_interval = 1u32.secs() / fps;
+        let _ = led_tick::spawn_after(fps_interval);
     }
 
     #[idle]

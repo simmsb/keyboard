@@ -32,6 +32,8 @@ mod app {
         usb_hid_class: HidClass<'static, Usbd<UsbPeripheral<'static>>, Keyboard<()>>,
         #[lock_free]
         layout: Layout<12, 4, 1, keyboard_thing::layout::CustomEvent>,
+        log_in: bbqueue::Producer<'static, 128>,
+        event_sender: EventSender<DomToSub, nrf52840_hal::pac::UARTE0>,
     }
 
     #[local]
@@ -39,15 +41,15 @@ mod app {
         usb_dev: UsbDevice<'static, Usbd<UsbPeripheral<'static>>>,
         tick_timer: Timer<TIMER1, Periodic>,
         serial: usbd_serial::SerialPort<'static, Usbd<UsbPeripheral<'static>>>,
+        log_consumer: bbqueue::Consumer<'static, 128>,
         matrix: Matrix<Pin<Input<PullUp>>, Pin<Output<PushPull>>, 6, 4>,
         debouncer: Debouncer<[[bool; 6]; 4]>,
         other_side_events: EventReader<SubToDom, nrf52840_hal::pac::UARTE0>,
         other_side_queue: heapless::spsc::Queue<SubToDom, 8>,
-        event_sender: EventSender<DomToSub, nrf52840_hal::pac::UARTE0>,
         leds: Leds,
     }
 
-    #[init]
+    #[init(local = [log_buf: bbqueue::BBBuffer<128> = bbqueue::BBBuffer::new()])]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         static mut CLOCKS: Option<Clocks<ExternalOscillator, Internal, LfOscStopped>> = None;
         static mut USB_BUS: Option<
@@ -73,8 +75,6 @@ mod app {
         {}
 
         let mono = MonoTimer::new(ctx.device.TIMER0);
-
-        defmt::info!("Booting");
 
         let clocks = Clocks::new(ctx.device.CLOCK).enable_ext_hfosc();
         unsafe { CLOCKS.replace(clocks) };
@@ -102,9 +102,9 @@ mod app {
         let layout = Layout::new(&keyboard_thing::layout::LAYERS);
 
         let uarte_pins = uarte::Pins {
-            rxd: gpios_p0.p0_08.into_floating_input().degrade(),
-            txd: gpios_p1
-                .p1_04
+            rxd: gpios_p1.p1_04.into_floating_input().degrade(),
+            txd: gpios_p0
+                .p0_08
                 .into_push_pull_output(nrf52840_hal::gpio::Level::High)
                 .degrade(),
             cts: None,
@@ -112,13 +112,16 @@ mod app {
         };
 
         // TODO: do we need this
-        ctx.device.UARTE0.intenset.modify(|_, w| w.endrx().set_bit());
+        ctx.device
+            .UARTE0
+            .intenset
+            .modify(|_, w| w.endrx().set_bit());
 
         let uarte = Uarte::new(
             ctx.device.UARTE0,
             uarte_pins,
             uarte::Parity::EXCLUDED,
-            uarte::Baudrate::BAUD115200,
+            uarte::Baudrate::BAUD1M,
         );
         static mut UARTE_TX: [u8; 1] = [0; 1];
         static mut UARTE_RX: [u8; 1] = [0; 1];
@@ -134,12 +137,19 @@ mod app {
         tick_timer.start(Timer::<TIMER1, Periodic>::TICKS_PER_SECOND / 1000);
 
         let leds = Leds::new(ctx.device.PWM0, gpios_p0.p0_06.degrade());
+        let _ = led_tick::spawn_after(100.millis());
 
         rtic::pend(nrf52840_hal::pac::Interrupt::UARTE0_UART0);
+
+        let (log_in, log_consumer) = ctx.local.log_buf.try_split().unwrap();
+
+        let _ = late_setup_tasks::spawn_after(500.millis());
 
         let shared = Shared {
             layout,
             usb_hid_class,
+            log_in,
+            event_sender,
         };
 
         let local = Local {
@@ -151,21 +161,23 @@ mod app {
             debouncer,
             other_side_queue,
             other_side_events,
-            event_sender,
+            log_consumer,
         };
 
         (shared, local, init::Monotonics(mono))
     }
 
-    #[task(binds = UARTE0_UART0, priority = 4, local = [other_side_queue, other_side_events])]
-    fn rx_other_side(ctx: rx_other_side::Context) {
-        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-        while let Some(evt) = ctx.local.other_side_queue.dequeue() {
-            if let Some(evt) = evt.as_keyberon_event() {
-                handle_keyberon_event::spawn(evt).ok().unwrap();
-            }
-        }
-    }
+    // #[task(binds = UARTE0_UART0, priority = 4, local = [other_side_queue, other_side_events])]
+    // fn rx_other_side(ctx: rx_other_side::Context) {
+    //     let _ = log::spawn(b"Received uart interrupt from rhs\n");
+    //     let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
+    //     while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+    //         let _ = log::spawn(b"Received message from rhs\n");
+    //         if let Some(evt) = evt.as_keyberon_event() {
+    //             handle_keyberon_event::spawn(evt).ok().unwrap();
+    //         }
+    //     }
+    // }
 
     #[task(priority = 2, capacity = 8, shared = [layout])]
     fn handle_keyberon_event(ctx: handle_keyberon_event::Context, event: keyberon::layout::Event) {
@@ -195,9 +207,17 @@ mod app {
         {}
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer])]
+    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, other_side_queue, other_side_events])]
     fn tick(ctx: tick::Context) {
-        let _ = ctx.local.tick_timer.wait();
+        ctx.local.tick_timer.event_compare_cc0().write(|w| w);
+
+        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
+        while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+            // let _ = log::spawn(b"Received message from rhs\n");
+            if let Some(evt) = evt.as_keyberon_event() {
+                handle_keyberon_event::spawn(evt).ok().unwrap();
+            }
+        }
 
         for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
             handle_keyberon_event::spawn(event).unwrap();
@@ -206,41 +226,56 @@ mod app {
         tick_keyberon::spawn().unwrap();
     }
 
-    #[task(local = [cnt: u8 = 0, leds])]
-    fn led_tick(ctx: led_tick::Context, instant: keyboard_thing::mono::Instant) {
-        *ctx.local.cnt += 1;
+    #[task(priority = 1, local = [cnt: u16 = 0, leds])]
+    fn led_tick(ctx: led_tick::Context) {
+        *ctx.local.cnt = ctx.local.cnt.wrapping_add(1);
 
-        ctx.local
-            .leds
-            .send(keyboard_thing::leds::rainbow(*ctx.local.cnt));
+        critical_section::with(|_| {
+            ctx.local
+                .leds
+                .send(keyboard_thing::leds::rainbow(*ctx.local.cnt as u8));
+        });
 
-        let next_instant = instant + 16.millis();
-        led_tick::spawn_at(next_instant, next_instant).unwrap();
+        let fps = 30;
+        let fps_interval = 1u32.secs() / fps;
+        let _ = led_tick::spawn_after(fps_interval);
     }
 
-    #[idle(local = [usb_dev, serial], shared = [usb_hid_class])]
+    fn log_i(log_in: &mut bbqueue::Producer<128>, msg: &[u8]) {
+        let mut grant = log_in.grant_exact(msg.len()).unwrap();
+        grant.buf()[..msg.len()].copy_from_slice(msg);
+        grant.commit(msg.len());
+    }
+
+    #[task(shared = [log_in], capacity = 8)]
+    fn log(mut ctx: log::Context, msg: &'static [u8]) {
+        ctx.shared.log_in.lock(|log_in| {
+            log_i(log_in, msg);
+        });
+    }
+
+    #[task(shared = [event_sender])]
+    fn late_setup_tasks(mut ctx: late_setup_tasks::Context) {
+        ctx.shared.event_sender.lock(|evts| {
+            evts.send(&DomToSub::ResyncLeds);
+        });
+    }
+
+    #[idle(local = [usb_dev, serial, log_consumer], shared = [usb_hid_class])]
     // #[idle(local = [usb_hid_dev], shared = [usb_hid_class])]
     fn idle(mut ctx: idle::Context) -> ! {
         loop {
             ctx.shared.usb_hid_class.lock(|usb_class| {
                 if ctx.local.usb_dev.poll(&mut [ctx.local.serial, usb_class]) {
                     usb_class.poll();
-
-                    let mut buf = [0u8; 64];
-
-                    match ctx.local.serial.read(&mut buf[..]) {
-                        Ok(c) => {
-                            let _ = ctx.local.serial.write(b"cock: ");
-                            let _ = ctx.local.serial.write(&buf[..c]);
-                            let _ = ctx.local.serial.write(b"\r\n");
-                        }
-                        Err(UsbError::WouldBlock) => {}
-                        Err(e) => {
-                            defmt::error!("Oopsie usb {:?}", e as u8);
-                        }
-                    }
                 }
             });
+
+            if let Ok(grant) = ctx.local.log_consumer.read() {
+                if let Ok(l) = ctx.local.serial.write(grant.buf()) {
+                    grant.release(l);
+                }
+            }
         }
     }
 }

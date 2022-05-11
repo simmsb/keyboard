@@ -38,10 +38,9 @@ pub fn colour_gen<F, U>(f: F) -> impl Iterator<Item = U>
 where
     F: Fn(u8, u8) -> U,
 {
-    UNDERGLOW_LED_POSITIONS
-        .iter()
-        .chain(SWITCH_LED_POSITIONS.iter())
-        .map(move |(x, y)| f(*x, *y))
+    let buf_a = UNDERGLOW_LED_POSITIONS.map(|(x, y)| f(x, y));
+    let buf_b = SWITCH_LED_POSITIONS.map(|(x, y)| f(x, y));
+    buf_a.into_iter().chain(buf_b.into_iter())
 }
 
 pub fn split_colour_gen<FU, FS, U>(underglow: FU, switches: FS) -> impl Iterator<Item = U>
@@ -49,22 +48,17 @@ where
     FU: Fn(u8, u8) -> U,
     FS: Fn(u8, u8) -> U,
 {
-    UNDERGLOW_LED_POSITIONS
-        .iter()
-        .map(move |(x, y)| underglow(*x, *y))
-        .chain(
-            SWITCH_LED_POSITIONS
-                .iter()
-                .map(move |(x, y)| switches(*x, *y)),
-        )
+    let buf_a = UNDERGLOW_LED_POSITIONS.map(|(x, y)| underglow(x, y));
+    let buf_b = SWITCH_LED_POSITIONS.map(|(x, y)| switches(x, y));
+    buf_a.into_iter().chain(buf_b.into_iter())
 }
 
 pub fn rainbow(offset: u8) -> impl Iterator<Item = RGB8> {
     colour_gen(move |x, y| {
         hsv2rgb(smart_leds::hsv::Hsv {
-            hue: x.wrapping_add(y.wrapping_mul(2)).wrapping_add(offset),
-            sat: 127,
-            val: 255,
+            hue: x.wrapping_mul(6).wrapping_add(y.wrapping_mul(2)).wrapping_add(offset),
+            sat: 255,
+            val: 25,
         })
     })
 }
