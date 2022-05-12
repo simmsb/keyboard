@@ -117,14 +117,9 @@ mod app {
         }
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, event_sender, other_side_queue, other_side_events])]
+    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, event_sender])]
     fn tick(ctx: tick::Context) {
         let _ = ctx.local.tick_timer.wait();
-
-        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-        while let Some(evt) = ctx.local.other_side_queue.dequeue() {
-            let _ = handle_event::spawn(evt);
-        }
 
         for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
             let msg = match event {
@@ -140,19 +135,22 @@ mod app {
     fn led_tick(ctx: led_tick::Context) {
         let led_cnt = LED_CNT.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
-        critical_section::with(|_| {
-            ctx.local
-                .leds
-                .send(keyboard_thing::leds::rainbow(led_cnt as u8));
-        });
+        ctx.local
+            .leds
+            .send(keyboard_thing::leds::rainbow(led_cnt as u8));
 
         let fps = 30;
         let fps_interval = 1u32.secs() / fps;
         let _ = led_tick::spawn_after(fps_interval);
     }
 
-    #[idle]
-    fn idle(_ctx: idle::Context) -> ! {
-        loop {}
+    #[idle(local = [other_side_queue, other_side_events])]
+    fn idle(ctx: idle::Context) -> ! {
+        loop {
+            let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
+            while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+                let _ = handle_event::spawn(evt);
+            }
+        }
     }
 }

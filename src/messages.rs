@@ -11,7 +11,7 @@ pub enum DomToSub {
     ResyncLeds,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Debug)]
 pub enum SubToDom {
     KeyPressed(u8, u8),
     KeyReleased(u8, u8),
@@ -47,8 +47,12 @@ impl<T: Serialize, UT: Instance> EventSender<T, UT> {
             postcard::serialize_with_flavor(val, Cobs::try_new(Slice::new(&mut buf)).unwrap())
                 .ok()?;
 
-        self.tx.bwrite_all(buf).ok()?;
-        self.tx.bflush().ok()?;
+        critical_section::with(|_| {
+            self.tx.bwrite_all(buf).ok()?;
+            self.tx.bflush().ok()?;
+
+            Some(())
+        })?;
 
         Some(())
     }

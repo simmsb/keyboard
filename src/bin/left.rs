@@ -5,6 +5,8 @@ use keyboard_thing as _;
 
 #[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
 mod app {
+    use core::fmt::Write;
+
     use embedded_hal::timer::CountDown;
     use fugit::ExtU32;
     use keyberon::debounce::Debouncer;
@@ -207,17 +209,9 @@ mod app {
         {}
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, other_side_queue, other_side_events])]
+    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer])]
     fn tick(ctx: tick::Context) {
         ctx.local.tick_timer.event_compare_cc0().write(|w| w);
-
-        let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-        while let Some(evt) = ctx.local.other_side_queue.dequeue() {
-            // let _ = log::spawn(b"Received message from rhs\n");
-            if let Some(evt) = evt.as_keyberon_event() {
-                handle_keyberon_event::spawn(evt).ok().unwrap();
-            }
-        }
 
         for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
             handle_keyberon_event::spawn(event).unwrap();
@@ -230,11 +224,9 @@ mod app {
     fn led_tick(ctx: led_tick::Context) {
         *ctx.local.cnt = ctx.local.cnt.wrapping_add(1);
 
-        critical_section::with(|_| {
-            ctx.local
-                .leds
-                .send(keyboard_thing::leds::rainbow(*ctx.local.cnt as u8));
-        });
+        ctx.local
+            .leds
+            .send(keyboard_thing::leds::rainbow(*ctx.local.cnt as u8));
 
         let fps = 30;
         let fps_interval = 1u32.secs() / fps;
@@ -261,10 +253,21 @@ mod app {
         });
     }
 
-    #[idle(local = [usb_dev, serial, log_consumer], shared = [usb_hid_class])]
+    #[idle(local = [usb_dev, serial, log_consumer, other_side_queue, other_side_events], shared = [usb_hid_class])]
     // #[idle(local = [usb_hid_dev], shared = [usb_hid_class])]
     fn idle(mut ctx: idle::Context) -> ! {
         loop {
+            let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
+            while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+                // let _ = log::spawn(b"Received message from rhs\n");
+                if let Some(evt) = evt.as_keyberon_event() {
+                    let mut buf = heapless::Vec::<u8, 128>::new();
+                    let _ = write!(&mut buf, "Received event: {:?}", evt);
+
+                    handle_keyberon_event::spawn(evt).ok().unwrap();
+                }
+            }
+
             ctx.shared.usb_hid_class.lock(|usb_class| {
                 if ctx.local.usb_dev.poll(&mut [ctx.local.serial, usb_class]) {
                     usb_class.poll();
