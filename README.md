@@ -11,5 +11,5 @@ the one not part of the group of three pins in a line)
 
 ## Flashing
 
-I have some scripts in the [](justfile) for generating UF2 files that can be
+I have some scripts in [here](justfile) for generating UF2 files that can be
 used to flash the nice!nanos, there's no need for a debugger.
