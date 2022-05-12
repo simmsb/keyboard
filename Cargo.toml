@@ -23,7 +23,7 @@ defmt-rtt = { version = "0.3.2", optional = true }
 embedded-hal = "0.2.7"
 fugit = "0.3.5"
 heapless = "0.7.11"
-keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
+keyberon = { git = "https://github.com/simmsb/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
 nrf52840-hal = { version = "0.15.0", features = ["rt"] }
 panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }

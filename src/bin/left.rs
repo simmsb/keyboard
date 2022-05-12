@@ -3,12 +3,13 @@
 
 use keyboard_thing as _;
 
-#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1])]
+#[rtic::app(device = nrf52840_hal::pac, peripherals = true, dispatchers = [SWI0_EGU0, SWI1_EGU1, SWI2_EGU2])]
 mod app {
     use core::fmt::Write;
 
     use embedded_hal::timer::CountDown;
     use fugit::ExtU32;
+    use keyberon::chording::Chording;
     use keyberon::debounce::Debouncer;
     use keyberon::hid::HidClass;
     use keyberon::keyboard::Keyboard;
@@ -33,7 +34,7 @@ mod app {
     struct Shared {
         usb_hid_class: HidClass<'static, Usbd<UsbPeripheral<'static>>, Keyboard<()>>,
         #[lock_free]
-        layout: Layout<12, 4, 1, keyboard_thing::layout::CustomEvent>,
+        layout: Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>,
         log_in: bbqueue::Producer<'static, 128>,
         event_sender: EventSender<DomToSub, nrf52840_hal::pac::UARTE0>,
     }
@@ -46,12 +47,18 @@ mod app {
         log_consumer: bbqueue::Consumer<'static, 128>,
         matrix: Matrix<Pin<Input<PullUp>>, Pin<Output<PushPull>>, 6, 4>,
         debouncer: Debouncer<[[bool; 6]; 4]>,
+        chording: Chording<{ keyboard_thing::layout::NUM_CHORDS }>,
         other_side_events: EventReader<SubToDom, nrf52840_hal::pac::UARTE0>,
         other_side_queue: heapless::spsc::Queue<SubToDom, 8>,
+        other_side_key_events_in: heapless::spsc::Producer<'static, keyberon::layout::Event, 128>,
+        other_side_key_events_out: heapless::spsc::Consumer<'static, keyberon::layout::Event, 128>,
         leds: Leds,
     }
 
-    #[init(local = [log_buf: bbqueue::BBBuffer<128> = bbqueue::BBBuffer::new()])]
+    #[init(local = [
+        log_buf: bbqueue::BBBuffer<128> = bbqueue::BBBuffer::new(),
+        key_queue: heapless::spsc::Queue<keyberon::layout::Event, 128> = heapless::spsc::Queue::new()
+    ])]
     fn init(ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         static mut CLOCKS: Option<Clocks<ExternalOscillator, Internal, LfOscStopped>> = None;
         static mut USB_BUS: Option<
@@ -80,6 +87,34 @@ mod app {
 
         let clocks = Clocks::new(ctx.device.CLOCK).enable_ext_hfosc();
         unsafe { CLOCKS.replace(clocks) };
+
+        ctx.device.USBD.intenset.write(|w| {
+            w.endepin0().set_bit();
+            w.endepin1().set_bit();
+            w.endepin2().set_bit();
+            w.endepin3().set_bit();
+            w.endepin4().set_bit();
+            w.endepin5().set_bit();
+            w.endepin6().set_bit();
+            w.endepin7().set_bit();
+
+            w.endepout0().set_bit();
+            w.endepout1().set_bit();
+            w.endepout2().set_bit();
+            w.endepout3().set_bit();
+            w.endepout4().set_bit();
+            w.endepout5().set_bit();
+            w.endepout6().set_bit();
+            w.endepout7().set_bit();
+
+            w.ep0datadone().set_bit();
+            w.ep0setup().set_bit();
+            w.sof().set_bit();
+            w.usbevent().set_bit();
+            w.usbreset().set_bit();
+            w
+        });
+
         let usb_bus = Usbd::new(UsbPeripheral::new(ctx.device.USBD, unsafe {
             CLOCKS.as_ref().unwrap()
         }));
@@ -100,7 +135,8 @@ mod app {
         let gpios_p1 = nrf52840_hal::gpio::p1::Parts::new(ctx.device.P1);
 
         let matrix = keyboard_thing::build_matrix!(gpios_p0, gpios_p1);
-        let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 5);
+        let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 30);
+        let chording = Chording::new(&keyboard_thing::layout::CHORDS);
         let layout = Layout::new(&keyboard_thing::layout::LAYERS);
 
         let uarte_pins = uarte::Pins {
@@ -144,6 +180,7 @@ mod app {
         rtic::pend(nrf52840_hal::pac::Interrupt::UARTE0_UART0);
 
         let (log_in, log_consumer) = ctx.local.log_buf.try_split().unwrap();
+        let (other_side_key_events_in, other_side_key_events_out) = ctx.local.key_queue.split();
 
         let _ = late_setup_tasks::spawn_after(500.millis());
 
@@ -161,9 +198,12 @@ mod app {
             serial,
             matrix,
             debouncer,
+            chording,
             other_side_queue,
             other_side_events,
             log_consumer,
+            other_side_key_events_in,
+            other_side_key_events_out,
         };
 
         (shared, local, init::Monotonics(mono))
@@ -181,9 +221,24 @@ mod app {
     //     }
     // }
 
-    #[task(priority = 2, capacity = 8, shared = [layout])]
-    fn handle_keyberon_event(ctx: handle_keyberon_event::Context, event: keyberon::layout::Event) {
-        ctx.shared.layout.event(event);
+    // #[task(priority = 3, capacity = 8, shared = [layout])]
+    // fn handle_keyberon_event(ctx: handle_keyberon_event::Context, event: keyberon::layout::Event) {
+    //     ctx.shared.layout.event(event);
+    // }
+
+    #[task(binds = USBD, priority = 3, local = [usb_dev, serial, log_consumer], shared = [usb_hid_class])]
+    fn tick_usb(mut ctx: tick_usb::Context) {
+        ctx.shared.usb_hid_class.lock(|usb_class| {
+            if ctx.local.usb_dev.poll(&mut [ctx.local.serial, usb_class]) {
+                usb_class.poll();
+            }
+        });
+
+        if let Ok(grant) = ctx.local.log_consumer.read() {
+            if let Ok(l) = ctx.local.serial.write(grant.buf()) {
+                grant.release(l);
+            }
+        }
     }
 
     #[task(priority = 2, shared = [layout, usb_hid_class])]
@@ -209,12 +264,31 @@ mod app {
         {}
     }
 
-    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer])]
+    #[task(binds = TIMER1, priority = 2, local = [tick_timer, matrix, debouncer, chording, other_side_key_events_out], shared = [layout])]
     fn tick(ctx: tick::Context) {
-        ctx.local.tick_timer.event_compare_cc0().write(|w| w);
+        let _ = ctx.local.tick_timer.wait();
 
-        for event in ctx.local.debouncer.events(ctx.local.matrix.get().unwrap()) {
-            handle_keyberon_event::spawn(event).unwrap();
+        let mut events: heapless::Vec<_, 16> = heapless::Vec::new();
+        while let Some(event) = ctx.local.other_side_key_events_out.dequeue() {
+            let _ = events.push(event);
+        }
+
+        let events = ctx.local.chording.tick(events);
+
+        for event in events {
+            ctx.shared.layout.event(event);
+        }
+
+        let events = ctx
+            .local
+            .debouncer
+            .events(ctx.local.matrix.get().unwrap())
+            .collect::<heapless::Vec<_, 16>>();
+
+        let events = ctx.local.chording.tick(events);
+
+        for event in events {
+            ctx.shared.layout.event(event);
         }
 
         tick_keyberon::spawn().unwrap();
@@ -222,24 +296,27 @@ mod app {
 
     #[task(priority = 1, local = [cnt: u16 = 0, leds])]
     fn led_tick(ctx: led_tick::Context) {
-        *ctx.local.cnt = ctx.local.cnt.wrapping_add(1);
+        // *ctx.local.cnt = ctx.local.cnt.wrapping_add(1);
 
-        ctx.local
-            .leds
-            .send(keyboard_thing::leds::rainbow(*ctx.local.cnt as u8));
+        // critical_section::with(|_| {
+        //     ctx.local
+        //         .leds
+        //         .send(keyboard_thing::leds::rainbow(*ctx.local.cnt as u8));
+        // });
 
-        let fps = 30;
-        let fps_interval = 1u32.secs() / fps;
-        let _ = led_tick::spawn_after(fps_interval);
+        // let fps = 30;
+        // let fps_interval = 1u32.secs() / fps;
+        // let _ = led_tick::spawn_after(fps_interval);
     }
 
     fn log_i(log_in: &mut bbqueue::Producer<128>, msg: &[u8]) {
-        let mut grant = log_in.grant_exact(msg.len()).unwrap();
-        grant.buf()[..msg.len()].copy_from_slice(msg);
-        grant.commit(msg.len());
+        if let Ok(mut grant) = log_in.grant_exact(msg.len()) {
+            grant.buf()[..msg.len()].copy_from_slice(msg);
+            grant.commit(msg.len());
+        }
     }
 
-    #[task(shared = [log_in], capacity = 8)]
+    #[task(shared = [log_in], capacity = 16)]
     fn log(mut ctx: log::Context, msg: &'static [u8]) {
         ctx.shared.log_in.lock(|log_in| {
             log_i(log_in, msg);
@@ -248,35 +325,25 @@ mod app {
 
     #[task(shared = [event_sender])]
     fn late_setup_tasks(mut ctx: late_setup_tasks::Context) {
-        ctx.shared.event_sender.lock(|evts| {
-            evts.send(&DomToSub::ResyncLeds);
+        ctx.shared.event_sender.lock(|events| {
+            events.send(&DomToSub::ResyncLeds);
         });
     }
 
-    #[idle(local = [usb_dev, serial, log_consumer, other_side_queue, other_side_events], shared = [usb_hid_class])]
-    // #[idle(local = [usb_hid_dev], shared = [usb_hid_class])]
+    #[idle(local = [other_side_queue, other_side_events, other_side_key_events_in], shared = [log_in])]
     fn idle(mut ctx: idle::Context) -> ! {
         loop {
             let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-            while let Some(evt) = ctx.local.other_side_queue.dequeue() {
+            while let Some(event) = ctx.local.other_side_queue.dequeue() {
                 // let _ = log::spawn(b"Received message from rhs\n");
-                if let Some(evt) = evt.as_keyberon_event() {
-                    let mut buf = heapless::Vec::<u8, 128>::new();
-                    let _ = write!(&mut buf, "Received event: {:?}", evt);
+                if let Some(event) = event.as_keyberon_event() {
+                    // let mut buf = heapless::Vec::<u8, 128>::new();
+                    // let _ = write!(&mut buf, "Received event: {:?}\r\n", event);
+                    // ctx.shared.log_in.lock(|log_in| {
+                    //     log_i(log_in, &buf);
+                    // });
 
-                    handle_keyberon_event::spawn(evt).ok().unwrap();
-                }
-            }
-
-            ctx.shared.usb_hid_class.lock(|usb_class| {
-                if ctx.local.usb_dev.poll(&mut [ctx.local.serial, usb_class]) {
-                    usb_class.poll();
-                }
-            });
-
-            if let Ok(grant) = ctx.local.log_consumer.read() {
-                if let Ok(l) = ctx.local.serial.write(grant.buf()) {
-                    grant.release(l);
+                    ctx.local.other_side_key_events_in.enqueue(event).unwrap();
                 }
             }
         }

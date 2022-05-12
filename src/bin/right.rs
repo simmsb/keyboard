@@ -48,7 +48,7 @@ mod app {
         let gpios_p1 = nrf52840_hal::gpio::p1::Parts::new(ctx.device.P1);
 
         let matrix = keyboard_thing::build_matrix!(gpios_p0, gpios_p1);
-        let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 5);
+        let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 30);
 
         // TODO: not sure if we need to flip these, check schematic
         let uarte_pins = uarte::Pins {
@@ -148,8 +148,8 @@ mod app {
     fn idle(ctx: idle::Context) -> ! {
         loop {
             let _ = ctx.local.other_side_events.read(ctx.local.other_side_queue);
-            while let Some(evt) = ctx.local.other_side_queue.dequeue() {
-                let _ = handle_event::spawn(evt);
+            while let Some(event) = ctx.local.other_side_queue.dequeue() {
+                let _ = handle_event::spawn(event);
             }
         }
     }

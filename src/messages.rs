@@ -47,12 +47,8 @@ impl<T: Serialize, UT: Instance> EventSender<T, UT> {
             postcard::serialize_with_flavor(val, Cobs::try_new(Slice::new(&mut buf)).unwrap())
                 .ok()?;
 
-        critical_section::with(|_| {
-            self.tx.bwrite_all(buf).ok()?;
-            self.tx.bflush().ok()?;
-
-            Some(())
-        })?;
+        self.tx.bwrite_all(buf).ok()?;
+        self.tx.bflush().ok()?;
 
         Some(())
     }

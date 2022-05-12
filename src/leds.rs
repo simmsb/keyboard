@@ -56,9 +56,12 @@ where
 pub fn rainbow(offset: u8) -> impl Iterator<Item = RGB8> {
     colour_gen(move |x, y| {
         hsv2rgb(smart_leds::hsv::Hsv {
-            hue: x.wrapping_mul(6).wrapping_add(y.wrapping_mul(2)).wrapping_add(offset),
+            hue: x
+                .wrapping_mul(6)
+                .wrapping_add(y.wrapping_mul(2))
+                .wrapping_add(offset),
             sat: 255,
-            val: 25,
+            val: 40,
         })
     })
 }
@@ -79,6 +82,8 @@ impl Leds {
         T: Iterator<Item = I>,
         I: Into<RGB8>,
     {
-        let _ = self.pwm.write(iterator);
+        critical_section::with(|_| {
+            let _ = self.pwm.write(iterator);
+        });
     }
 }
