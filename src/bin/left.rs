@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
+use cortex_m::peripheral::SCB;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::Channel,
@@ -61,6 +62,9 @@ async fn main(spawner: Spawner, p: Peripherals) {
     while clock.events_hfclkstarted.read().bits() != 1 {}
 
     while !power.usbregstatus.read().vbusdetect().is_vbus_present() {}
+
+    let mut cortex_p = cortex_m::Peripherals::take().unwrap();
+    cortex_p.SCB.enable_icache();
 
     let irq = interrupt::take!(USBD);
     let usb_driver = usb::Driver::new(p.USBD, irq);
