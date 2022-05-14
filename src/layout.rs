@@ -2,8 +2,14 @@ use keyberon::action::{k, l, m, Action};
 use keyberon::chording::ChordDef;
 use keyberon::key_code::KeyCode;
 
+pub const COLS_PER_SIDE: usize = 6;
+pub const COLS: usize = COLS_PER_SIDE * 2;
+pub const ROWS: usize = 4;
+pub const N_LAYERS: usize = 3;
+
 pub type CustomEvent = core::convert::Infallible;
-pub type Layers = keyberon::layout::Layers<12, 5, 3, CustomEvent>;
+pub type Layers = keyberon::layout::Layers<COLS, { ROWS + 1 }, N_LAYERS, CustomEvent>;
+pub type Layout = keyberon::layout::Layout<COLS, { ROWS + 1 }, N_LAYERS, CustomEvent>;
 
 const ALT_TAB: Action<CustomEvent> = Action::HoldTap {
     timeout: 200,

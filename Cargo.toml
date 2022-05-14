@@ -35,6 +35,7 @@ usbd-hid = "0.6.0"
 ssd1306 = "0.7.0"
 embedded-graphics = "0.7.1"
 ufmt = "0.1.0"
+micromath = "2.0.0"
 
 [features]
 nightly = ["embassy-nrf/nightly", "embassy-nrf/unstable-traits", "embedded-io/async" ]
@@ -66,9 +67,6 @@ codegen-units = 1
 debug = 0
 debug-assertions = false # <-
 incremental = false
-# NOTE disabled to work around issue rust-lang/rust#90357
-# the bug results in log messages not having location information
-# (the line printed below the log message that contains the file-line location)
 lto = 'fat'
 opt-level = "s" # <-
 overflow-checks = false # <-

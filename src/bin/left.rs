@@ -2,7 +2,6 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
-use cortex_m::peripheral::SCB;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::Channel,
@@ -31,25 +30,21 @@ use embedded_graphics::{
     Drawable,
 };
 use keyberon::{
-    chording::Chording,
-    debounce::Debouncer,
-    key_code::KbHidReport,
-    layout::{Event, Layout},
-    matrix::Matrix,
+    chording::Chording, debounce::Debouncer, key_code::KbHidReport, layout::Event, matrix::Matrix,
 };
 use keyboard_thing::{
     self as _,
-    oled::{display_timeout_task, Oled},
-};
-use keyboard_thing::{
-    leds::{rainbow, Leds},
+    layout::{Layout, COLS_PER_SIDE, ROWS},
+    leds::{rainbow_single, Hsl, Leds, TapWaves},
     messages::{DomToSub, EventReader, EventSender, SubToDom},
+    oled::{display_timeout_task, Oled},
 };
 use ufmt::uwrite;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 static LOG_CHAN: Channel<ThreadModeRawMutex, &'static str, 16> = Channel::new();
 static KEY_EVENT_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+static KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 static HID_CHAN: Channel<ThreadModeRawMutex, KbHidReport, 1> = Channel::new();
 static EVENT_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
 
@@ -119,12 +114,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let leds = Leds::new(p.PWM0, p.P0_06);
 
     let matrix = keyboard_thing::build_matrix!(p);
-    let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 30);
+    let debouncer = Debouncer::new(
+        [[false; COLS_PER_SIDE]; ROWS],
+        [[false; COLS_PER_SIDE]; ROWS],
+        30,
+    );
     let chording = Chording::new(&keyboard_thing::layout::CHORDS);
 
-    static LAYOUT: Forever<
-        Mutex<ThreadModeRawMutex, Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>>,
-    > = Forever::new();
+    static LAYOUT: Forever<Mutex<ThreadModeRawMutex, Layout>> = Forever::new();
     let layout = LAYOUT.put(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
 
     let mut uart_config = uarte::Config::default();
@@ -220,12 +217,7 @@ async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>)
 }
 
 #[embassy::task]
-async fn layout_task(
-    layout: &'static Mutex<
-        ThreadModeRawMutex,
-        Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>,
-    >,
-) {
+async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let mut layout = layout.lock().await;
         layout.tick();
@@ -236,12 +228,7 @@ async fn layout_task(
 }
 
 #[embassy::task]
-async fn keyboard_event_task(
-    layout: &'static Mutex<
-        ThreadModeRawMutex,
-        Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>,
-    >,
-) {
+async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let event = KEY_EVENT_CHAN.recv().await;
         let mut layout = layout.lock().await;
@@ -254,14 +241,18 @@ async fn keyboard_event_task(
 
 #[embassy::task]
 async fn keyboard_poll_task(
-    mut matrix: Matrix<Input<'static, AnyPin>, Output<'static, AnyPin>, 6, 4>,
-    mut debouncer: Debouncer<[[bool; 6]; 4]>,
+    mut matrix: Matrix<Input<'static, AnyPin>, Output<'static, AnyPin>, COLS_PER_SIDE, ROWS>,
+    mut debouncer: Debouncer<[[bool; COLS_PER_SIDE]; ROWS]>,
     mut chording: Chording<{ keyboard_thing::layout::NUM_CHORDS }>,
 ) {
     loop {
         let events = debouncer
             .events(matrix.get().unwrap())
             .collect::<heapless::Vec<_, 16>>();
+
+        for event in &events {
+            let _ = KEY_LISTEN_CHAN.try_send(*event);
+        }
 
         let events = chording.tick(events);
 
@@ -276,9 +267,16 @@ async fn keyboard_poll_task(
 #[embassy::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
+    let mut tapwaves = TapWaves::new();
+
     for i in (0..255u8).cycle() {
+        while let Ok(event) = KEY_LISTEN_CHAN.try_recv() {
+            tapwaves.update(event);
+        }
+
+        leds.send(tapwaves.render(|x, y| Hsl::from_hsv(rainbow_single(x, y, i))));
+
         Timer::after(Duration::from_millis(1000 / fps)).await;
-        leds.send(rainbow(i));
     }
 }
 
