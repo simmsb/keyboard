@@ -1,18 +1,17 @@
 #![no_main]
 #![no_std]
+#![feature(type_alias_impl_trait)]
 
-pub mod mono;
 pub mod layout;
+pub mod leds;
 pub mod matrix;
 pub mod messages;
-pub mod leds;
 
-use nrf52840_hal as _;
 
-#[cfg(feature = "debugger")]
-use defmt_rtt as _; // global logger
-#[cfg(feature = "debugger")]
-use panic_probe as _;
+// #[cfg(feature = "debugger")]
+// use defmt_rtt as _; // global logger
+// #[cfg(feature = "debugger")]
+// use panic_probe as _;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;
@@ -23,20 +22,20 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     cortex_m::asm::udf()
 }
 
-// same panicking *behavior* as `panic-probe` but doesn't print a panic message
-// this prevents the panic message being printed *twice* when `defmt::panic` is invoked
-#[cfg(feature = "debugger")]
-#[defmt::panic_handler]
-fn panic() -> ! {
-    cortex_m::asm::udf()
-}
+// // same panicking *behavior* as `panic-probe` but doesn't print a panic message
+// // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
+// #[cfg(feature = "debugger")]
+// #[defmt::panic_handler]
+// fn panic() -> ! {
+//     cortex_m::asm::udf()
+// }
 
-/// Terminates the application and makes `probe-run` exit with exit-code = 0
-pub fn exit() -> ! {
-    loop {
-        cortex_m::asm::bkpt();
-    }
-}
+// /// Terminates the application and makes `probe-run` exit with exit-code = 0
+// pub fn exit() -> ! {
+//     loop {
+//         cortex_m::asm::bkpt();
+//     }
+// }
 
 // // defmt-test 0.3.0 has the limitation that this `#[tests]` attribute can only be used
 // // once within a crate. the module can be in any file but there can only be at most

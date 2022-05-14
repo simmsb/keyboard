@@ -1,34 +1,22 @@
 #[macro_export]
 macro_rules! build_matrix {
-    ($gpios_p0:ident, $gpios_p1:ident) => {{
+    ($p:ident) => {{
+        use embassy_nrf::gpio::{Input, Level, OutputDrive, Pull, Pin};
         use keyberon::matrix::Matrix;
-        use nrf52840_hal::gpio::{p0, p1};
         Matrix::new(
             [
-                $gpios_p0.p0_31.into_pullup_input().degrade(),
-                $gpios_p0.p0_29.into_pullup_input().degrade(),
-                $gpios_p0.p0_02.into_pullup_input().degrade(),
-                $gpios_p1.p1_15.into_pullup_input().degrade(),
-                $gpios_p1.p1_13.into_pullup_input().degrade(),
-                $gpios_p1.p1_11.into_pullup_input().degrade(),
+                Input::new($p.P0_31.degrade(), Pull::Up),
+                Input::new($p.P0_29.degrade(), Pull::Up),
+                Input::new($p.P0_02.degrade(), Pull::Up),
+                Input::new($p.P1_15.degrade(), Pull::Up),
+                Input::new($p.P1_13.degrade(), Pull::Up),
+                Input::new($p.P1_11.degrade(), Pull::Up),
             ],
             [
-                $gpios_p0
-                    .p0_22
-                    .into_push_pull_output(nrf52840_hal::gpio::Level::High)
-                    .degrade(),
-                $gpios_p0
-                    .p0_24
-                    .into_push_pull_output(nrf52840_hal::gpio::Level::High)
-                    .degrade(),
-                $gpios_p1
-                    .p1_00
-                    .into_push_pull_output(nrf52840_hal::gpio::Level::High)
-                    .degrade(),
-                $gpios_p0
-                    .p0_11
-                    .into_push_pull_output(nrf52840_hal::gpio::Level::High)
-                    .degrade(),
+                Output::new($p.P0_22.degrade(), Level::High, OutputDrive::Standard),
+                Output::new($p.P0_24.degrade(), Level::High, OutputDrive::Standard),
+                Output::new($p.P1_00.degrade(), Level::High, OutputDrive::Standard),
+                Output::new($p.P0_11.degrade(), Level::High, OutputDrive::Standard),
             ],
         )
         .unwrap()

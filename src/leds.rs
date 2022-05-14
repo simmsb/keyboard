@@ -1,5 +1,6 @@
-use nrf52840_hal::gpio::{Disconnected, Pin};
-use nrf52840_hal::pac::PWM0;
+use embassy_nrf::gpio::Pin;
+use embassy_nrf::peripherals::PWM0;
+use embassy_nrf::Unborrow;
 use nrf_smartled::RGB8;
 use smart_leds::hsv::hsv2rgb;
 use smart_leds::SmartLedsWrite;
@@ -67,11 +68,11 @@ pub fn rainbow(offset: u8) -> impl Iterator<Item = RGB8> {
 }
 
 pub struct Leds {
-    pwm: nrf_smartled::pwm::Pwm<PWM0>,
+    pwm: nrf_smartled::pwm::Pwm<'static, PWM0>,
 }
 
 impl Leds {
-    pub fn new(pwm0: PWM0, pin: Pin<Disconnected>) -> Self {
+    pub fn new<P: Pin + Unborrow<Target = P>>(pwm0: PWM0, pin: P) -> Self {
         Self {
             pwm: nrf_smartled::pwm::Pwm::new(pwm0, pin),
         }
@@ -82,8 +83,8 @@ impl Leds {
         T: Iterator<Item = I>,
         I: Into<RGB8>,
     {
-        critical_section::with(|_| {
-            let _ = self.pwm.write(iterator);
-        });
+        // critical_section::with(|_| {
+        let _ = self.pwm.write(iterator);
+        // });
     }
 }

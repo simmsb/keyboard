@@ -15,31 +15,36 @@ harness = false
 [dependencies]
 bbqueue = "0.5.1"
 cortex-m = { version = "0.7.4", features = ["linker-plugin-lto"] }
-cortex-m-rt = "0.7.1"
-cortex-m-rtic = "1.1.2"
-critical-section = "0.2.7"
+# critical-section = "0.2.7"
 defmt = "0.3.1"
-defmt-rtt = { version = "0.3.2", optional = true }
-embedded-hal = "0.2.7"
+# defmt-rtt = { version = "0.3.2", optional = true }
+embassy = { git = "https://github.com/embassy-rs/embassy", features = [] }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["nrf52840", "gpiote", "time-driver-rtc1"] }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [] }
+embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = [] }
+embedded-io = { version = "0.2.0" }
+# embedded-hal = "0.2.7"
 fugit = "0.3.5"
 heapless = "0.7.11"
 keyberon = { git = "https://github.com/simmsb/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
-nrf52840-hal = { version = "0.15.0", features = ["rt"] }
-panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
+# nrf52840-hal = { version = "0.15.0", features = ["rt"] }
+# panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
 postcard = "0.7.3"
-rtic-monotonic = "1.0.0"
+# rtic-monotonic = "1.0.0"
 serde = { version = "1.0.137", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
-usb-device = "0.2.8"
-usbd-serial = "0.1.1"
-
-# [dev-dependencies]
-# defmt-test = "0.3.0"
+cortex-m-rt = "0.7.1"
+futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
+usbd-hid = "0.6.0"
+# usb-device = "0.2.8"
+# usbd-serial = "0.1.1"
 
 [features]
-default = ["log-noop"]
-debugger = ["defmt-rtt", "panic-probe"]
+nightly = ["embassy-nrf/nightly", "embassy-nrf/unstable-traits", "embedded-io/async" ]
+default = ["log-noop", "nightly"]
+#debugger = ["defmt-rtt", "panic-probe"]
 log-noop = []
 
 # cargo build/run
@@ -83,11 +88,3 @@ incremental = false
 lto = 'false'
 opt-level = 3 # <-
 overflow-checks = false # <-
-
-# uncomment this to switch from the crates.io version of defmt to its git version
-# check app-template's README for instructions
-# [patch.crates-io]
-# defmt = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version reported by `probe-run --version`" }
-# defmt-rtt = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version reported by `probe-run --version`" }
-# defmt-test = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version reported by `probe-run --version`" }
-# panic-probe = { git = "https://github.com/knurling-rs/defmt", rev = "use defmt version reported by `probe-run --version`" }
