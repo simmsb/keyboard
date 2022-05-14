@@ -2,26 +2,49 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
-use embassy::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy::channel::Channel;
-use embassy::executor::Spawner;
-use embassy::time::{Duration, Timer};
-use embassy::util::Forever;
-use embassy_nrf::gpio::{AnyPin, Input, Output};
-use embassy_nrf::peripherals::UARTE0;
-use embassy_nrf::usb::Driver;
-use embassy_nrf::{interrupt, pac, peripherals, uarte, usb, Peripherals};
+use embassy::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::Channel,
+    executor::Spawner,
+    mutex::Mutex,
+    time::{Duration, Timer},
+    util::Forever,
+};
+use embassy_nrf::{
+    gpio::{AnyPin, Input, Output},
+    interrupt, pac,
+    peripherals::{self, TWISPI0, UARTE0},
+    twim::{self, Twim},
+    uarte,
+    usb::{self, Driver},
+    Peripherals,
+};
 use embassy_usb::UsbDevice;
 use embassy_usb_hid::HidWriter;
 use embassy_usb_serial::CdcAcmClass;
-use keyberon::chording::Chording;
-use keyberon::debounce::Debouncer;
-use keyberon::key_code::KbHidReport;
-use keyberon::layout::{Event, Layout};
-use keyberon::matrix::Matrix;
-use keyboard_thing as _;
-use keyboard_thing::leds::{rainbow, Leds};
-use keyboard_thing::messages::{DomToSub, EventReader, EventSender, SubToDom};
+use embedded_graphics::{
+    mono_font::{ascii::FONT_6X13, MonoTextStyleBuilder},
+    pixelcolor::BinaryColor,
+    prelude::Point,
+    text::{Text, TextStyleBuilder},
+    Drawable,
+};
+use keyberon::{
+    chording::Chording,
+    debounce::Debouncer,
+    key_code::KbHidReport,
+    layout::{Event, Layout},
+    matrix::Matrix,
+};
+use keyboard_thing::{
+    self as _,
+    oled::{display_timeout_task, Oled},
+};
+use keyboard_thing::{
+    leds::{rainbow, Leds},
+    messages::{DomToSub, EventReader, EventSender, SubToDom},
+};
+use ufmt::uwrite;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 static LOG_CHAN: Channel<ThreadModeRawMutex, &'static str, 16> = Channel::new();
@@ -94,7 +117,11 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let matrix = keyboard_thing::build_matrix!(p);
     let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 30);
     let chording = Chording::new(&keyboard_thing::layout::CHORDS);
-    let layout = Layout::new(&keyboard_thing::layout::LAYERS);
+
+    static LAYOUT: Forever<
+        Mutex<ThreadModeRawMutex, Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>>,
+    > = Forever::new();
+    let layout = LAYOUT.put(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
 
     let mut uart_config = uarte::Config::default();
     uart_config.parity = uarte::Parity::EXCLUDED;
@@ -106,6 +133,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let events_out = EventSender::new(uart_out);
     let events_in = EventReader::new(uart_in);
 
+    let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
+    let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
+
+    static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
+    let oled = OLED.put(Mutex::new(Oled::new(twim)));
+
+    spawner.spawn(oled_task(oled)).unwrap();
+    spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(log_task(serial_class)).unwrap();
     spawner.spawn(hid_task(hid)).unwrap();
@@ -116,6 +151,45 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner.spawn(keyboard_event_task(layout)).unwrap();
     spawner.spawn(read_events_task(events_in)).unwrap();
     spawner.spawn(send_events_task(events_out)).unwrap();
+}
+
+#[embassy::task]
+async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
+    let character_style = MonoTextStyleBuilder::new()
+        .font(&FONT_6X13)
+        .text_color(BinaryColor::On)
+        .build();
+
+    let text_style = TextStyleBuilder::new()
+        .alignment(embedded_graphics::text::Alignment::Center)
+        .build();
+
+    let mut buf: heapless::String<128> = heapless::String::new();
+    let mut n = 0u32;
+
+    loop {
+        buf.clear();
+        let _ = uwrite!(&mut buf, "hello\nworld\n{}", n);
+        let text = Text::with_text_style(&buf, Point::new(20, 30), character_style, text_style);
+
+        oled.lock().await.draw(|d| {
+            let _ = text.draw(d);
+        });
+
+        n += 1;
+        Timer::after(Duration::from_secs(1)).await;
+    }
+}
+
+#[embassy::task]
+async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
+    display_timeout_task(oled).await;
+}
+
+#[embassy::task]
+async fn startup_task() {
+    Timer::after(Duration::from_millis(100)).await;
+    EVENT_CHAN.send(DomToSub::ResyncLeds).await;
 }
 
 #[embassy::task]
@@ -142,15 +216,35 @@ async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>)
 }
 
 #[embassy::task]
-async fn keyboard_event_task(mut layout: Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>) {
+async fn layout_task(
+    layout: &'static Mutex<
+        ThreadModeRawMutex,
+        Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>,
+    >,
+) {
+    loop {
+        let mut layout = layout.lock().await;
+        layout.tick();
+        HID_CHAN.send(layout.keycodes().collect()).await;
+
+        Timer::after(Duration::from_millis(1)).await;
+    }
+}
+
+#[embassy::task]
+async fn keyboard_event_task(
+    layout: &'static Mutex<
+        ThreadModeRawMutex,
+        Layout<12, 5, 3, keyboard_thing::layout::CustomEvent>,
+    >,
+) {
     loop {
         let event = KEY_EVENT_CHAN.recv().await;
+        let mut layout = layout.lock().await;
         layout.event(event);
         while let Ok(event) = KEY_EVENT_CHAN.try_recv() {
             layout.event(event);
         }
-        layout.tick();
-        HID_CHAN.send(layout.keycodes().collect()).await;
     }
 }
 

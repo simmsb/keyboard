@@ -6,6 +6,7 @@ pub mod layout;
 pub mod leds;
 pub mod matrix;
 pub mod messages;
+pub mod oled;
 
 
 // #[cfg(feature = "debugger")]

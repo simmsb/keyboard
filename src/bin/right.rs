@@ -4,19 +4,24 @@
 
 use core::sync::atomic::AtomicU8;
 
-use embassy::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy::channel::Channel;
-use embassy::executor::Spawner;
-use embassy::time::{Duration, Timer};
-use embassy_nrf::gpio::{AnyPin, Input, Output};
-use embassy_nrf::peripherals::UARTE0;
-use embassy_nrf::{interrupt, uarte, Peripherals};
-use keyberon::chording::Chording;
-use keyberon::debounce::Debouncer;
-use keyberon::matrix::Matrix;
+use embassy::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::Channel,
+    executor::Spawner,
+    time::{Duration, Timer},
+};
+use embassy_nrf::{
+    gpio::{AnyPin, Input, Output},
+    interrupt,
+    peripherals::UARTE0,
+    uarte, Peripherals,
+};
+use keyberon::{chording::Chording, debounce::Debouncer, matrix::Matrix};
 use keyboard_thing as _;
-use keyboard_thing::leds::{rainbow, Leds};
-use keyboard_thing::messages::{DomToSub, EventReader, EventSender, SubToDom};
+use keyboard_thing::{
+    leds::{rainbow, Leds},
+    messages::{DomToSub, EventReader, EventSender, SubToDom},
+};
 
 static EVENT_CHAN: Channel<ThreadModeRawMutex, SubToDom, 4> = Channel::new();
 static LED_COUNTER: AtomicU8 = AtomicU8::new(0);
