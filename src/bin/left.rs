@@ -2,13 +2,15 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
+use core::sync::atomic::AtomicU32;
+
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::Channel,
     executor::Spawner,
     mutex::Mutex,
     time::{Duration, Timer},
-    util::Forever,
+    util::{select, Forever},
 };
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
@@ -36,17 +38,30 @@ use keyboard_thing::{
     self as _,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Hsl, Leds, TapWaves},
-    messages::{DomToSub, EventReader, EventSender, SubToDom},
+    messages::{DomToSub, EventReader, EventSender, HostToKeyboard, KeyboardToHost, SubToDom},
     oled::{display_timeout_task, Oled},
+};
+use postcard::{
+    flavors::{Cobs, Slice},
+    CobsAccumulator,
 };
 use ufmt::uwrite;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
+static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
+
+static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+
+/// Channels that receive each debounced key press
+static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
+/// Channel log messages are put on to be sent to the computer
 static LOG_CHAN: Channel<ThreadModeRawMutex, &'static str, 16> = Channel::new();
-static KEY_EVENT_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
-static KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+/// Key events that have been chorded or received from the other side
+static PROCESSED_KEY_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+/// Channel HID events are put on to be sent to the computer
 static HID_CHAN: Channel<ThreadModeRawMutex, KbHidReport, 1> = Channel::new();
-static EVENT_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
+/// Channel commands are put on to be sent to the other side
+static COMMAND_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
@@ -143,7 +158,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner.spawn(oled_task(oled)).unwrap();
     spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(usb_task(usb)).unwrap();
-    spawner.spawn(log_task(serial_class)).unwrap();
+    spawner.spawn(usb_serial_task(serial_class)).unwrap();
     spawner.spawn(hid_task(hid)).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
     spawner
@@ -170,7 +185,12 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
 
     loop {
         buf.clear();
-        let _ = uwrite!(&mut buf, "hello\nworld\n{}", n);
+        let _ = uwrite!(
+            &mut buf,
+            "keypresses: {}\nticks: {}",
+            TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed),
+            n
+        );
         let text = Text::with_text_style(&buf, Point::new(20, 30), character_style, text_style);
 
         oled.lock().await.draw(|d| {
@@ -190,13 +210,13 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
 #[embassy::task]
 async fn startup_task() {
     Timer::after(Duration::from_millis(100)).await;
-    EVENT_CHAN.send(DomToSub::ResyncLeds).await;
+    COMMAND_CHAN.send(DomToSub::ResyncLeds).await;
 }
 
 #[embassy::task]
 async fn send_events_task(mut events_out: EventSender<'static, DomToSub, UARTE0>) {
     loop {
-        let evt = EVENT_CHAN.recv().await;
+        let evt = COMMAND_CHAN.recv().await;
         let _ = events_out.send(&evt).await;
     }
 }
@@ -210,7 +230,7 @@ async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>)
         while let Some(event) = queue.dequeue() {
             if let Some(event) = event.as_keyberon_event() {
                 // events from the other side are already debounced and chord-resolved
-                KEY_EVENT_CHAN.send(event).await;
+                PROCESSED_KEY_CHAN.send(event).await;
             }
         }
     }
@@ -230,12 +250,15 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
 #[embassy::task]
 async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
-        let event = KEY_EVENT_CHAN.recv().await;
+        let event = PROCESSED_KEY_CHAN.recv().await;
         let mut layout = layout.lock().await;
         layout.event(event);
-        while let Ok(event) = KEY_EVENT_CHAN.try_recv() {
+        let mut total = 1;
+        while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
             layout.event(event);
+            total += 1;
         }
+        TOTAL_KEYPRESSES.fetch_add(total, core::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -251,16 +274,18 @@ async fn keyboard_poll_task(
             .collect::<heapless::Vec<_, 16>>();
 
         for event in &events {
-            let _ = KEY_LISTEN_CHAN.try_send(*event);
+            for chan in KEY_EVENT_CHANS {
+                let _ = chan.try_send(*event);
+            }
         }
 
         let events = chording.tick(events);
 
         for event in events {
-            KEY_EVENT_CHAN.send(event).await;
+            PROCESSED_KEY_CHAN.send(event).await;
         }
 
-        Timer::after(Duration::from_millis(20)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
@@ -270,7 +295,7 @@ async fn led_task(mut leds: Leds) {
     let mut tapwaves = TapWaves::new();
 
     for i in (0..255u8).cycle() {
-        while let Ok(event) = KEY_LISTEN_CHAN.try_recv() {
+        while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
             tapwaves.update(event);
         }
 
@@ -290,20 +315,74 @@ async fn hid_task(mut hid: HidWriter<'static, UsbDriver, 8>) {
     }
 }
 
-async fn log_inner(class: &mut CdcAcmClass<'static, UsbDriver>) -> Option<()> {
+async fn handle_cmd(
+    class: &mut CdcAcmClass<'static, UsbDriver>,
+    cmd: HostToKeyboard,
+) -> Option<()> {
+    match cmd {
+        HostToKeyboard::RequestStats => {
+            let keypresses = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
+            let msg = KeyboardToHost::Stats { keypresses };
+
+            let mut buf = [0u8; 64];
+            let buf =
+                postcard::serialize_with_flavor(&msg, Cobs::try_new(Slice::new(&mut buf)).unwrap())
+                    .ok()?;
+
+            class.write_packet(&buf).await.ok()?;
+        }
+    }
+
+    Some(())
+}
+
+async fn usb_serial_inner(class: &mut CdcAcmClass<'static, UsbDriver>) -> Option<()> {
+    let mut recv = [0u8; 64];
+    let mut accumulator = CobsAccumulator::<128>::new();
     loop {
-        let msg = LOG_CHAN.recv().await;
-        for chunk in msg.as_bytes().chunks(64) {
-            class.write_packet(chunk).await.ok()?;
+        let r = select(LOG_CHAN.recv(), class.read_packet(&mut recv)).await;
+        match r {
+            embassy::util::Either::First(log) => {
+                for chunk in log.as_bytes().chunks(60) {
+                    if let Ok(v) = heapless::Vec::<u8, 60>::from_slice(chunk) {
+                        let msg = KeyboardToHost::Log(v);
+                        let mut buf = [0u8; 64];
+                        let buf = postcard::serialize_with_flavor(
+                            &msg,
+                            Cobs::try_new(Slice::new(&mut buf)).unwrap(),
+                        )
+                        .ok()?;
+
+                        class.write_packet(&buf).await.ok()?;
+                    }
+                }
+                class.write_packet(&[]).await.ok()?;
+            }
+            embassy::util::Either::Second(Ok(n)) => {
+                let mut window = &recv[..n];
+                'cobs: while !window.is_empty() {
+                    window = match accumulator.feed(window) {
+                        postcard::FeedResult::Consumed => break 'cobs,
+                        postcard::FeedResult::OverFull(buf) => buf,
+                        postcard::FeedResult::DeserError(buf) => buf,
+                        postcard::FeedResult::Success { data, remaining } => {
+                            let _ = handle_cmd(class, data).await;
+
+                            remaining
+                        }
+                    }
+                }
+            }
+            embassy::util::Either::Second(_) => {}
         }
     }
 }
 
 #[embassy::task]
-async fn log_task(mut class: CdcAcmClass<'static, UsbDriver>) {
+async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
     loop {
         class.wait_connection().await;
-        let _ = log_inner(&mut class).await;
+        let _ = usb_serial_inner(&mut class).await;
     }
 }
 

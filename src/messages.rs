@@ -16,6 +16,19 @@ pub enum SubToDom {
     KeyReleased(u8, u8),
 }
 
+#[derive(Serialize, Deserialize, Eq, PartialEq)]
+pub enum HostToKeyboard {
+    RequestStats,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq)]
+pub enum KeyboardToHost {
+    Stats {
+        keypresses: u32,
+    },
+    Log(heapless::Vec<u8, 60>)
+}
+
 const BUF_SIZE: usize = 128;
 
 impl SubToDom {

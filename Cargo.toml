@@ -18,12 +18,12 @@ cortex-m = { version = "0.7.4", features = ["linker-plugin-lto"] }
 # critical-section = "0.2.7"
 defmt = "0.3.1"
 embassy = { git = "https://github.com/embassy-rs/embassy", features = [] }
-embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["nrf52840", "gpiote", "time-driver-rtc1"] }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["nrf52840", "gpiote", "time-driver-rtc1", "time"] }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [] }
 embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = [] }
-embedded-io = { version = "0.2.0" }
-heapless = { version = "0.7.11", features = ["ufmt-write", "ufmt-impl"] }
+embedded-io = "0.2.0"
+heapless = { version = "0.7.12", features = ["ufmt-write", "ufmt-impl"] }
 keyberon = { git = "https://github.com/simmsb/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
 postcard = "0.7.3"
@@ -38,7 +38,9 @@ ufmt = "0.1.0"
 micromath = "2.0.0"
 
 [features]
-nightly = ["embassy-nrf/nightly", "embassy-nrf/unstable-traits", "embedded-io/async" ]
+nightly = ["embassy/nightly", "embassy/unstable-traits",
+           "embassy-nrf/nightly", "embassy-nrf/unstable-traits", 
+           "embedded-io/async" ]
 default = ["log-noop", "nightly"]
 #debugger = ["defmt-rtt", "panic-probe"]
 log-noop = []

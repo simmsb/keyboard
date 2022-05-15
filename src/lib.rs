@@ -8,7 +8,6 @@ pub mod matrix;
 pub mod messages;
 pub mod oled;
 
-
 // #[cfg(feature = "debugger")]
 // use defmt_rtt as _; // global logger
 // #[cfg(feature = "debugger")]
