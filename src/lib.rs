@@ -8,10 +8,10 @@ pub mod matrix;
 pub mod messages;
 pub mod oled;
 
-// #[cfg(feature = "debugger")]
-// use defmt_rtt as _; // global logger
-// #[cfg(feature = "debugger")]
-// use panic_probe as _;
+#[cfg(feature = "debugger")]
+use defmt_rtt as _; // global logger
+#[cfg(feature = "debugger")]
+use panic_probe as _;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;

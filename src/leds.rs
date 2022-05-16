@@ -59,43 +59,6 @@ where
     buf_a.into_iter().chain(buf_b.into_iter())
 }
 
-#[derive(Clone, Copy)]
-pub struct Hsl {
-    pub hue: u8,
-    pub sat: u8,
-    pub lum: u8,
-}
-
-impl Hsl {
-    pub fn to_hsv(self) -> Hsv {
-        let val = self.lum + self.sat * self.lum.min(255 - self.lum);
-        let sat = if val == 0 {
-            0
-        } else {
-            2 * (255 - (self.lum / val))
-        };
-        Hsv {
-            hue: self.hue,
-            sat,
-            val,
-        }
-    }
-
-    pub fn from_hsv(hsv: Hsv) -> Self {
-        let lum = hsv.val * (255 - (hsv.sat / 2));
-        let sat = if lum == 0 || lum == 255 {
-            0
-        } else {
-            (hsv.val - lum) / lum.min(255 - lum)
-        };
-        Hsl {
-            hue: hsv.hue,
-            sat,
-            lum,
-        }
-    }
-}
-
 pub fn rainbow_single(x: u8, y: u8, offset: u8) -> Hsv {
     Hsv {
         hue: x
@@ -103,7 +66,7 @@ pub fn rainbow_single(x: u8, y: u8, offset: u8) -> Hsv {
             .wrapping_add(y.wrapping_mul(2))
             .wrapping_add(offset),
         sat: 255,
-        val: 40,
+        val: 127,
     }
 }
 
@@ -115,10 +78,60 @@ pub struct TapWaves {
     matrix: [[u8; COLS_PER_SIDE]; ROWS],
 }
 
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    (1.0 - t) * a + t * b
+}
+
+fn dmod(a: f32, m: f32) -> f32 {
+    a - m * (a / m).floor()
+}
+
+fn lerp_wrap(a: f32, b: f32, m: f32, t: f32) -> f32 {
+    let b_prime = [b - m, b, b + m]
+        .into_iter()
+        .min_by(|x, y| (a - *x).abs().total_cmp(&(a - *y).abs()))
+        .unwrap();
+    dmod(lerp(a, b_prime, t), m)
+}
+
+fn c_f(x: f32) -> u8 {
+    (x * 255.0) as u8
+}
+
+fn c_b(x: u8) -> f32 {
+    (x as f32) / 255.0
+}
+
+fn blend_hsv(a: Hsv, b: Hsv, t: f32) -> Hsv {
+    Hsv {
+        hue: c_f(lerp_wrap(c_b(a.hue), c_b(b.hue), 1.0, t)),
+        sat: c_f(lerp(c_b(a.sat), c_b(b.sat), t)),
+        val: c_f(lerp(c_b(a.val), c_b(b.val), t)),
+    }
+}
+
+fn components(hsv: Hsv) -> (u8, u8, u8) {
+    (hsv.hue, hsv.sat, hsv.val)
+}
+
 impl TapWaves {
     pub fn new() -> Self {
         Self {
             matrix: Default::default(),
+        }
+    }
+
+    pub fn tick(&mut self) {
+        for v in self.matrix.iter_mut().flatten() {
+            if *v == 255 {
+                *v = 0;
+            }
+
+            if *v == 0 {
+                continue;
+            }
+
+            *v = v.saturating_add(30);
         }
     }
 
@@ -135,17 +148,9 @@ impl TapWaves {
         {
             *v = 1;
         }
-
-        for v in self.matrix.iter_mut().flatten() {
-            if *v == 0 {
-                continue;
-            }
-
-            *v = v.wrapping_add(1);
-        }
     }
 
-    fn brightness_sums(&self, x: u8, y: u8) -> u8 {
+    fn brightness_sums(&self, x: u8, y: u8) -> f32 {
         let x = x as f32;
         let y = y as f32;
         let mut brightness = 0f32;
@@ -154,9 +159,12 @@ impl TapWaves {
             let yy = yy as f32;
             for (xx, v) in row.iter().enumerate() {
                 let xx = xx as f32;
+                if *v == 0 {
+                    continue;
+                }
 
                 // percentage radius of keypress wave as [0, 1]
-                let radius = 255.0 / (*v as f32);
+                let radius = (*v as f32) / 255.0;
 
                 // percentage distance of this led from the origin [0, 1]
                 let dist = ((x - xx).powi(2) + (y - yy).powi(2)).sqrt() / 8.0;
@@ -164,24 +172,34 @@ impl TapWaves {
                 // how close is the led to the current wavefront [0, 1]
                 let delta = (radius - dist).abs();
 
-                // we want the curve to be steeper
-                let b = delta.powi(4);
+                // calculate the brightness
+                let b = delta.powi(2);
 
                 brightness += b;
             }
         }
 
-        (brightness.min(0.0).max(1.0) * 255.0) as u8
+        brightness.clamp(0.0, 1.0)
     }
 
-    pub fn render<'s, 'a: 's>(&'s self, below: impl Fn(u8, u8) -> Hsl + 'a) -> impl Iterator<Item = RGB8> + 's {
+    pub fn render<'s, 'a: 's>(
+        &'s self,
+        below: impl Fn(u8, u8) -> Hsv + 'a,
+    ) -> impl Iterator<Item = RGB8> + 's {
         colour_gen(move |x, y| {
-            let mut colour = below(x, y);
+            let colour = below(x, y);
 
             let b = self.brightness_sums(x, y);
 
-            colour.lum = colour.lum.max(b);
-            hsv2rgb(colour.to_hsv())
+            let white = Hsv {
+                hue: 0,
+                sat: 0,
+                val: 255,
+            };
+            let colour_out = blend_hsv(colour, white, b);
+            // defmt::debug!("in: {:?}, out: {:?}, b: {}", components(colour), components(colour_out), b);
+
+            hsv2rgb(colour_out)
         })
     }
 }
@@ -202,8 +220,8 @@ impl Leds {
         T: Iterator<Item = I>,
         I: Into<RGB8>,
     {
-        // critical_section::with(|_| {
-        let _ = self.pwm.write(gamma(iterator.map(Into::into)));
-        // });
+        critical_section::with(|_| {
+            let _ = self.pwm.write(gamma(iterator.map(Into::into)));
+        });
     }
 }

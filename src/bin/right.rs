@@ -85,19 +85,20 @@ async fn keyboard_poll_task(
     loop {
         let events = debouncer
             .events(matrix.get().unwrap())
+            .map(|e| e.transform(|x, y| (x, 11 - y)))
             .collect::<heapless::Vec<_, 16>>();
 
         let events = chording.tick(events);
 
         for event in events {
             let msg = match event {
-                keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, 11 - y),
-                keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, 11 - y),
+                keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, y),
+                keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, y),
             };
             EVENT_CHAN.send(msg).await;
         }
 
-        Timer::after(Duration::from_millis(20)).await;
+        Timer::after(Duration::from_millis(1)).await;
     }
 }
 

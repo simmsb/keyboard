@@ -17,32 +17,41 @@ bbqueue = "0.5.1"
 cortex-m = { version = "0.7.4", features = ["linker-plugin-lto"] }
 # critical-section = "0.2.7"
 defmt = "0.3.1"
-embassy = { git = "https://github.com/embassy-rs/embassy", features = [] }
-embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["nrf52840", "gpiote", "time-driver-rtc1", "time"] }
-embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [] }
+embassy = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote"] }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
-embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = [] }
+embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 embedded-io = "0.2.0"
 heapless = { version = "0.7.12", features = ["ufmt-write", "ufmt-impl"] }
 keyberon = { git = "https://github.com/simmsb/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
+# nrf-smartled = { path = "../nrf-smartled", features = ["52840"] }
 postcard = "0.7.3"
 serde = { version = "1.0.137", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
-cortex-m-rt = "0.7.1"
+cortex-m-rt = { version = "0.7.1" }
+# cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"] }
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
 usbd-hid = "0.6.0"
 ssd1306 = "0.7.0"
 embedded-graphics = "0.7.1"
 ufmt = "0.1.0"
 micromath = "2.0.0"
+critical-section = "0.2.7"
+panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
+defmt-rtt = { version = "0.3", optional = true }
+
+# [patch.crates-io]
+# cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
 
 [features]
 nightly = ["embassy/nightly", "embassy/unstable-traits",
            "embassy-nrf/nightly", "embassy-nrf/unstable-traits", 
            "embedded-io/async" ]
-default = ["log-noop", "nightly"]
-#debugger = ["defmt-rtt", "panic-probe"]
+# default = ["log-noop", "nightly"]
+default = ["debugger", "nightly"]
+debugger = ["panic-probe", "defmt-rtt"]
 log-noop = []
 
 # cargo build/run
@@ -66,10 +75,10 @@ overflow-checks = true # <-
 # cargo build/run --release
 [profile.release]
 codegen-units = 1
-debug = 0
+debug = 1
 debug-assertions = false # <-
 incremental = false
-lto = 'fat'
+# lto = 'fat'
 opt-level = "s" # <-
 overflow-checks = false # <-
 

@@ -37,7 +37,7 @@ use keyberon::{
 use keyboard_thing::{
     self as _,
     layout::{Layout, COLS_PER_SIDE, ROWS},
-    leds::{rainbow_single, Hsl, Leds, TapWaves, rainbow},
+    leds::{rainbow, rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventReader, EventSender, HostToKeyboard, KeyboardToHost, SubToDom},
     oled::{display_timeout_task, Oled},
 };
@@ -45,6 +45,7 @@ use postcard::{
     flavors::{Cobs, Slice},
     CobsAccumulator,
 };
+use smart_leds::hsv::Hsv;
 use ufmt::uwrite;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
@@ -65,89 +66,92 @@ static COMMAND_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
-    // let clock: pac::CLOCK = unsafe { core::mem::transmute(()) };
-    // let power: pac::POWER = unsafe { core::mem::transmute(()) };
+    let clock: pac::CLOCK = unsafe { core::mem::transmute(()) };
+    let power: pac::POWER = unsafe { core::mem::transmute(()) };
 
-    // clock.tasks_hfclkstart.write(|w| unsafe { w.bits(1) });
-    // while clock.events_hfclkstarted.read().bits() != 1 {}
+    clock.tasks_hfclkstart.write(|w| unsafe { w.bits(1) });
+    while clock.events_hfclkstarted.read().bits() != 1 {}
 
-    // while !power.usbregstatus.read().vbusdetect().is_vbus_present() {}
+    while !power.usbregstatus.read().vbusdetect().is_vbus_present() {}
 
     // let mut cortex_p = cortex_m::Peripherals::take().unwrap();
     // cortex_p.SCB.enable_icache();
 
-    // let irq = interrupt::take!(USBD);
-    // let usb_driver = usb::Driver::new(p.USBD, irq);
+    let irq = interrupt::take!(USBD);
+    let usb_driver = usb::Driver::new(p.USBD, irq);
 
-    // let mut config = embassy_usb::Config::new(0x6969, 0x0420);
-    // config.manufacturer.replace("test");
-    // config.product.replace("test");
-    // config.serial_number.replace("69420");
-    // config.max_packet_size_0 = 64;
+    let mut config = embassy_usb::Config::new(0x6969, 0x0420);
+    config.manufacturer.replace("test");
+    config.product.replace("test");
+    config.serial_number.replace("69420");
+    config.max_power = 500;
+    config.max_packet_size_0 = 64;
 
-    // struct Resources {
-    //     device_descriptor: [u8; 256],
-    //     config_descriptor: [u8; 256],
-    //     bos_descriptor: [u8; 256],
-    //     control_buf: [u8; 128],
-    //     serial_state: embassy_usb_serial::State<'static>,
-    //     usb_state: embassy_usb_hid::State<'static>,
-    // }
-    // static RESOURCES: Forever<Resources> = Forever::new();
+    struct Resources {
+        device_descriptor: [u8; 256],
+        config_descriptor: [u8; 256],
+        bos_descriptor: [u8; 256],
+        control_buf: [u8; 128],
+        serial_state: embassy_usb_serial::State<'static>,
+        usb_state: embassy_usb_hid::State<'static>,
+    }
+    static RESOURCES: Forever<Resources> = Forever::new();
 
-    // let res = RESOURCES.put(Resources {
-    //     device_descriptor: [0; 256],
-    //     config_descriptor: [0; 256],
-    //     bos_descriptor: [0; 256],
-    //     control_buf: [0; 128],
-    //     serial_state: embassy_usb_serial::State::new(),
-    //     usb_state: embassy_usb_hid::State::new(),
-    // });
+    let res = RESOURCES.put(Resources {
+        device_descriptor: [0; 256],
+        config_descriptor: [0; 256],
+        bos_descriptor: [0; 256],
+        control_buf: [0; 128],
+        serial_state: embassy_usb_serial::State::new(),
+        usb_state: embassy_usb_hid::State::new(),
+    });
 
-    // let mut builder = embassy_usb::Builder::new(
-    //     usb_driver,
-    //     config,
-    //     &mut res.device_descriptor,
-    //     &mut res.config_descriptor,
-    //     &mut res.bos_descriptor,
-    //     &mut res.control_buf,
-    //     None,
-    // );
+    let mut builder = embassy_usb::Builder::new(
+        usb_driver,
+        config,
+        &mut res.device_descriptor,
+        &mut res.config_descriptor,
+        &mut res.bos_descriptor,
+        &mut res.control_buf,
+        None,
+    );
 
-    // let serial_class = CdcAcmClass::new(&mut builder, &mut res.serial_state, 64);
+    let serial_class = CdcAcmClass::new(&mut builder, &mut res.serial_state, 64);
 
-    // let hid_config = embassy_usb_hid::Config {
-    //     report_descriptor: KeyboardReport::desc(),
-    //     request_handler: None,
-    //     poll_ms: 20,
-    //     max_packet_size: 64,
-    // };
-    // let hid = HidWriter::<_, 8>::new(&mut builder, &mut res.usb_state, hid_config);
+    let hid_config = embassy_usb_hid::Config {
+        report_descriptor: KeyboardReport::desc(),
+        request_handler: None,
+        poll_ms: 1,
+        max_packet_size: 64,
+    };
+    let hid = HidWriter::<_, 8>::new(&mut builder, &mut res.usb_state, hid_config);
 
-    // let usb = builder.build();
+    let usb = builder.build();
+
+    defmt::debug!("hello");
 
     let leds = Leds::new(p.PWM0, p.P0_06);
 
-    // let matrix = keyboard_thing::build_matrix!(p);
-    // let debouncer = Debouncer::new(
-    //     [[false; COLS_PER_SIDE]; ROWS],
-    //     [[false; COLS_PER_SIDE]; ROWS],
-    //     30,
-    // );
-    // let chording = Chording::new(&keyboard_thing::layout::CHORDS);
+    let matrix = keyboard_thing::build_matrix!(p);
+    let debouncer = Debouncer::new(
+        [[false; COLS_PER_SIDE]; ROWS],
+        [[false; COLS_PER_SIDE]; ROWS],
+        30,
+    );
+    let chording = Chording::new(&keyboard_thing::layout::CHORDS);
 
-    // static LAYOUT: Forever<Mutex<ThreadModeRawMutex, Layout>> = Forever::new();
-    // let layout = LAYOUT.put(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
+    static LAYOUT: Forever<Mutex<ThreadModeRawMutex, Layout>> = Forever::new();
+    let layout = LAYOUT.put(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
 
-    // let mut uart_config = uarte::Config::default();
-    // uart_config.parity = uarte::Parity::EXCLUDED;
-    // uart_config.baudrate = uarte::Baudrate::BAUD1M;
+    let mut uart_config = uarte::Config::default();
+    uart_config.parity = uarte::Parity::EXCLUDED;
+    uart_config.baudrate = uarte::Baudrate::BAUD1M;
 
-    // let irq = interrupt::take!(UARTE0_UART0);
-    // let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
-    // let (uart_out, uart_in) = uart.split();
-    // let events_out = EventSender::new(uart_out);
-    // let events_in = EventReader::new(uart_in);
+    let irq = interrupt::take!(UARTE0_UART0);
+    let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
+    let (uart_out, uart_in) = uart.split();
+    let events_out = EventSender::new(uart_out);
+    let events_in = EventReader::new(uart_in);
 
     // let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     // let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
@@ -157,16 +161,19 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     // spawner.spawn(oled_task(oled)).unwrap();
     // spawner.spawn(oled_timeout_task(oled)).unwrap();
-    // spawner.spawn(usb_task(usb)).unwrap();
-    // spawner.spawn(usb_serial_task(serial_class)).unwrap();
-    // spawner.spawn(hid_task(hid)).unwrap();
+    spawner.spawn(usb_task(usb)).unwrap();
+    spawner.spawn(usb_serial_task(serial_class)).unwrap();
+    spawner.spawn(hid_task(hid)).unwrap();
+
     spawner.spawn(led_task(leds)).unwrap();
-    // spawner
-    //     .spawn(keyboard_poll_task(matrix, debouncer, chording))
-    //     .unwrap();
-    // spawner.spawn(keyboard_event_task(layout)).unwrap();
-    // spawner.spawn(read_events_task(events_in)).unwrap();
-    // spawner.spawn(send_events_task(events_out)).unwrap();
+    spawner
+        .spawn(keyboard_poll_task(matrix, debouncer, chording))
+        .unwrap();
+    spawner.spawn(keyboard_event_task(layout)).unwrap();
+    spawner.spawn(layout_task(layout)).unwrap();
+    spawner.spawn(read_events_task(events_in)).unwrap();
+    spawner.spawn(send_events_task(events_out)).unwrap();
+    spawner.spawn(startup_task()).unwrap();
 }
 
 #[embassy::task]
@@ -228,6 +235,7 @@ async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>)
     loop {
         let _ = events_in.read(&mut queue).await;
         while let Some(event) = queue.dequeue() {
+            // defmt::debug!("Got event from rhs: {:?}", event);
             if let Some(event) = event.as_keyberon_event() {
                 // events from the other side are already debounced and chord-resolved
                 PROCESSED_KEY_CHAN.send(event).await;
@@ -238,10 +246,20 @@ async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>)
 
 #[embassy::task]
 async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
+    let mut last_report = None;
     loop {
-        let mut layout = layout.lock().await;
-        layout.tick();
-        HID_CHAN.send(layout.keycodes().collect()).await;
+        {
+            let mut layout = layout.lock().await;
+            layout.tick();
+
+            let collect: KbHidReport = layout.keycodes().collect();
+
+            if last_report.as_ref() != Some(&collect) {
+                defmt::debug!("hid report: {}", collect.as_bytes());
+                last_report = Some(collect.clone());
+                HID_CHAN.send(collect.clone()).await;
+            }
+        }
 
         Timer::after(Duration::from_millis(1)).await;
     }
@@ -251,14 +269,18 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
 async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let event = PROCESSED_KEY_CHAN.recv().await;
-        let mut layout = layout.lock().await;
-        layout.event(event);
-        let mut total = 1;
-        while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
+        {
+            let mut layout = layout.lock().await;
             layout.event(event);
-            total += 1;
+            defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
+            let mut total = 1;
+            while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
+                defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
+                layout.event(event);
+                total += 1;
+            }
+            TOTAL_KEYPRESSES.fetch_add(total, core::sync::atomic::Ordering::Relaxed);
         }
-        TOTAL_KEYPRESSES.fetch_add(total, core::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -285,18 +307,26 @@ async fn keyboard_poll_task(
             PROCESSED_KEY_CHAN.send(event).await;
         }
 
-        Timer::after(Duration::from_millis(10)).await;
+        Timer::after(Duration::from_millis(1)).await;
     }
 }
 
 #[embassy::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
+    let mut tapwaves = TapWaves::new();
 
     for i in (0..255u8).cycle() {
-        leds.send(rainbow(i));
+        while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
+            tapwaves.update(event);
+        }
 
-        // Timer::after(Duration::from_millis(1000 / fps)).await;
+        tapwaves.tick();
+
+        // leds.send(tapwaves.render(|x, y| Hsl::from_hsv(rainbow_single(x, y, i))));
+        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
+
+        Timer::after(Duration::from_millis(1000 / fps)).await;
     }
 }
 

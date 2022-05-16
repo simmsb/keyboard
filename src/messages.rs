@@ -5,12 +5,12 @@ use postcard::CobsAccumulator;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format)]
 pub enum DomToSub {
     ResyncLeds,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, defmt::Format)]
 pub enum SubToDom {
     KeyPressed(u8, u8),
     KeyReleased(u8, u8),
@@ -86,7 +86,6 @@ impl<'a, T: DeserializeOwned, UT: Instance> EventReader<'a, T, UT> {
     ) -> Option<()> {
         let mut buf = [0u8; 1];
         self.rx.read(&mut buf).await.ok()?;
-
         let mut window = &buf[..];
 
         'cobs: while !window.is_empty() {
