@@ -37,7 +37,7 @@ use keyberon::{
 use keyboard_thing::{
     self as _,
     layout::{Layout, COLS_PER_SIDE, ROWS},
-    leds::{rainbow, rainbow_single, Leds, TapWaves},
+    leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventReader, EventSender, HostToKeyboard, KeyboardToHost, SubToDom},
     oled::{display_timeout_task, Oled},
 };
@@ -45,7 +45,7 @@ use postcard::{
     flavors::{Cobs, Slice},
     CobsAccumulator,
 };
-use smart_leds::hsv::Hsv;
+
 use ufmt::uwrite;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
@@ -323,7 +323,6 @@ async fn led_task(mut leds: Leds) {
 
         tapwaves.tick();
 
-        // leds.send(tapwaves.render(|x, y| Hsl::from_hsv(rainbow_single(x, y, i))));
         leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
 
         Timer::after(Duration::from_millis(1000 / fps)).await;

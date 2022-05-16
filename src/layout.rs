@@ -40,7 +40,7 @@ pub const NUM_CHORDS: usize = 14;
 #[rustfmt::skip]
 pub static CHORDS: [ChordDef; NUM_CHORDS] = [
     ((3, 8), &[(0, 6), (0, 7)]), // y + u = bspc
-    ((4, 3), &[(0, 8), (0, 9)]), // u + i = del
+    ((4, 3), &[(0, 7), (0, 8)]), // u + i = del
     ((4, 0), &[(0, 0), (0, 1)]), // ` + q = esc
     ((4, 0), &[(0, 1), (0, 2)]), // q + w = esc
     ((4, 1), &[(2, 2), (2, 3)]), // x + c = M-x
@@ -64,7 +64,7 @@ pub static LAYERS: Layers  = keyberon::layout::layout! {
     {
         ['`' Q W E R T Y U I O P '\''],
         [LShift A S D F G H J K L ; RShift],
-        [LCtrl Z X C V B N M , . ? RCtrl],
+        [LCtrl Z X C V B N M , . / RCtrl],
         [n n n LGui {ALT_TAB} {L1_SP} {L2_SP} Enter BSpace n n n],
         [Escape {m(&[KeyCode::LAlt, KeyCode::X])} {m(&[KeyCode::Space, KeyCode::Grave])} Delete < {m(&[KeyCode::LShift, KeyCode::SColon])} > '\\' / '"' '\'' '_'],
     }

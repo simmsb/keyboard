@@ -27,17 +27,17 @@ pub const UNDERGLOW_LED_POSITIONS: [(u8, u8); UNDERGLOW_LEDS] = [
 #[rustfmt::skip]
 pub const SWITCH_LED_POSITIONS: [(u8, u8); SWITCH_LEDS] = [
     // first column: 7, 8, 9, 10
-    (0, 3), (0, 2), (0, 1), (0, 0),
+    (3, 5), (2, 5), (1, 5), (0, 5),
     // second column: 11, 12, 13, 14
-    (1, 1), (1, 2), (1, 3), (1, 4),
+    (0, 4), (1, 4), (2, 4), (3, 4),
     // third column: 15, 16, 17, 18
-    (2, 3), (2, 2), (2, 1), (2, 0),
+    (3, 3), (2, 3), (1, 3), (0, 3),
     // fourth column: 19, 20, 21
-    (3, 0), (3, 1), (3, 2),
+    (0, 2), (1, 2), (2, 2),
     // fifth column: 22, 23, 24
-    (4, 2), (4, 1), (4, 0),
+    (2, 1), (1, 1), (0, 1),
     // sixth column: 25, 26, 27
-    (5, 0), (5, 1), (5, 2)
+    (0, 0), (1, 0), (2, 0)
 ];
 
 pub fn colour_gen<F, U>(f: F) -> impl Iterator<Item = U>
@@ -72,10 +72,6 @@ pub fn rainbow_single(x: u8, y: u8, offset: u8) -> Hsv {
 
 pub fn rainbow(offset: u8) -> impl Iterator<Item = RGB8> {
     colour_gen(move |x, y| hsv2rgb(rainbow_single(x, y, offset)))
-}
-
-pub struct TapWaves {
-    matrix: [[u8; COLS_PER_SIDE]; ROWS],
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -114,6 +110,10 @@ fn components(hsv: Hsv) -> (u8, u8, u8) {
     (hsv.hue, hsv.sat, hsv.val)
 }
 
+pub struct TapWaves {
+    matrix: [[u8; ROWS]; COLS_PER_SIDE],
+}
+
 impl TapWaves {
     pub fn new() -> Self {
         Self {
@@ -131,7 +131,7 @@ impl TapWaves {
                 continue;
             }
 
-            *v = v.saturating_add(30);
+            *v = v.saturating_add(15);
         }
     }
 
@@ -163,17 +163,17 @@ impl TapWaves {
                     continue;
                 }
 
-                // percentage radius of keypress wave as [0, 1]
-                let radius = (*v as f32) / 255.0;
+                // percentage radius of keypress wave as [0, 2]
+                let radius = (*v as f32) / 127.0;
 
                 // percentage distance of this led from the origin [0, 1]
                 let dist = ((x - xx).powi(2) + (y - yy).powi(2)).sqrt() / 8.0;
 
                 // how close is the led to the current wavefront [0, 1]
-                let delta = (radius - dist).abs();
+                let delta = (dist - radius).abs();
 
                 // calculate the brightness
-                let b = delta.powi(2);
+                let b = (1.0 - delta).clamp(0.0, 1.0).powi(4);
 
                 brightness += b;
             }

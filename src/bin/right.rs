@@ -16,14 +16,19 @@ use embassy_nrf::{
     peripherals::UARTE0,
     uarte, Peripherals,
 };
-use keyberon::{chording::Chording, debounce::Debouncer, matrix::Matrix};
-use keyboard_thing as _;
+use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
-    leds::{rainbow, Leds},
+    self as _,
+    leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventReader, EventSender, SubToDom},
 };
 
-static EVENT_CHAN: Channel<ThreadModeRawMutex, SubToDom, 4> = Channel::new();
+static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+/// Channels that receive each debounced key press
+static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
+/// Channel commands are put on to be sent to the other side
+static COMMAND_CHAN: Channel<ThreadModeRawMutex, SubToDom, 4> = Channel::new();
+
 static LED_COUNTER: AtomicU8 = AtomicU8::new(0);
 
 #[embassy::main]
@@ -55,7 +60,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
 #[embassy::task]
 async fn send_events_task(mut events_out: EventSender<'static, SubToDom, UARTE0>) {
     loop {
-        let evt = EVENT_CHAN.recv().await;
+        let evt = COMMAND_CHAN.recv().await;
         let _ = events_out.send(&evt).await;
     }
 }
@@ -88,6 +93,12 @@ async fn keyboard_poll_task(
             .map(|e| e.transform(|x, y| (x, 11 - y)))
             .collect::<heapless::Vec<_, 16>>();
 
+        for event in &events {
+            for chan in KEY_EVENT_CHANS {
+                let _ = chan.try_send(event.transform(|x, y| (x, 11 - y)));
+            }
+        }
+
         let events = chording.tick(events);
 
         for event in events {
@@ -95,7 +106,7 @@ async fn keyboard_poll_task(
                 keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, y),
                 keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, y),
             };
-            EVENT_CHAN.send(msg).await;
+            COMMAND_CHAN.send(msg).await;
         }
 
         Timer::after(Duration::from_millis(1)).await;
@@ -105,9 +116,17 @@ async fn keyboard_poll_task(
 #[embassy::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
+    let mut tapwaves = TapWaves::new();
+
     loop {
+        while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
+            tapwaves.update(event);
+        }
+
+        tapwaves.tick();
+
         let i = LED_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Release);
+        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
         Timer::after(Duration::from_millis(1000 / fps)).await;
-        leds.send(rainbow(i));
     }
 }
