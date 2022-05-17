@@ -8,7 +8,11 @@ use embassy::{
     util::select,
 };
 use embassy_nrf::twim::{Instance, Twim};
-use ssd1306::{mode::BufferedGraphicsMode, prelude::*, I2CDisplayInterface, Ssd1306};
+use embedded_hal_async::i2c::I2c;
+use ssd1306::{
+    mode::BufferedGraphicsMode, prelude::I2CInterface, rotation::DisplayRotation,
+    size::DisplaySize128x32, I2CDisplayInterface, Ssd1306,
+};
 
 type OledDisplay<'a, T> =
     Ssd1306<I2CInterface<Twim<'a, T>>, DisplaySize128x32, BufferedGraphicsMode<DisplaySize128x32>>;
@@ -29,33 +33,26 @@ impl<'a, T: Instance> Oled<'a, T> {
         }
     }
 
-    pub fn draw(&mut self, f: impl Fn(&mut OledDisplay<'a, T>)) {
+    pub async fn draw(&mut self, f: impl Fn(&mut OledDisplay<'a, T>)) {
         f(&mut self.display);
-        let _ = self.display.flush();
+        let _ = self.display.flush().await;
     }
-}
 
-pub trait Toggleable {
-    fn set_on(&mut self);
-    fn set_off(&mut self);
-}
-
-impl<'a, T: Instance> Toggleable for Oled<'a, T> {
-    fn set_on(&mut self) {
+    async fn set_on(&mut self) {
         if self.status {
             return;
         }
 
-        let _ = self.display.set_display_on(true);
+        let _ = self.display.set_display_on(true).await;
         self.status = true;
     }
 
-    fn set_off(&mut self) {
+    async fn set_off(&mut self) {
         if !self.status {
             return;
         }
 
-        let _ = self.display.set_display_on(false);
+        let _ = self.display.set_display_on(false).await;
         self.status = false;
     }
 }
@@ -74,15 +71,18 @@ async fn set_noninteracted() {
     INTERACTED.store(false, core::sync::atomic::Ordering::SeqCst);
 }
 
-pub async fn display_timeout_task<T: Toggleable>(oled: &Mutex<ThreadModeRawMutex, T>) {
+pub async fn display_timeout_task<'a, T: Instance>(oled: &Mutex<ThreadModeRawMutex, Oled<'a, T>>)
+where
+    Twim<'a, T>: I2c<u8>,
+{
     loop {
         select(set_noninteracted(), INTERACTED_SIG.wait()).await;
         INTERACTED_SIG.reset();
 
         if INTERACTED.load(core::sync::atomic::Ordering::Relaxed) {
-            oled.lock().await.set_on();
+            oled.lock().await.set_on().await;
         } else {
-            oled.lock().await.set_off();
+            oled.lock().await.set_off().await;
         }
     }
 }

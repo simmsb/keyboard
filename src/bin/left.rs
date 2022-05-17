@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
+#![feature(generic_associated_types)]
 
 use core::sync::atomic::AtomicU32;
 
@@ -200,9 +201,12 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
         );
         let text = Text::with_text_style(&buf, Point::new(20, 30), character_style, text_style);
 
-        oled.lock().await.draw(|d| {
-            let _ = text.draw(d);
-        });
+        oled.lock()
+            .await
+            .draw(|d| {
+                let _ = text.draw(d);
+            })
+            .await;
 
         n += 1;
         Timer::after(Duration::from_secs(1)).await;

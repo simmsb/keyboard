@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
+#![feature(generic_associated_types)]
 
 pub mod layout;
 pub mod leds;
