@@ -216,12 +216,12 @@ dependencies = [
 [[package]]
 name = "display-interface"
 version = "0.4.1"
-source = "git+https://github.com/simmsb/display-interface#f2236aa105259745cfdf17fe8f70f40358f18ebb"
+source = "git+https://github.com/simmsb/display-interface.git#f2236aa105259745cfdf17fe8f70f40358f18ebb"
 
 [[package]]
 name = "display-interface-i2c"
 version = "0.4.0"
-source = "git+https://github.com/simmsb/display-interface#f2236aa105259745cfdf17fe8f70f40358f18ebb"
+source = "git+https://github.com/simmsb/display-interface.git#f2236aa105259745cfdf17fe8f70f40358f18ebb"
 dependencies = [
  "display-interface",
  "embedded-hal 0.2.7",
@@ -594,6 +594,7 @@ dependencies = [
  "critical-section",
  "defmt",
  "defmt-rtt",
+ "display-interface",
  "embassy",
  "embassy-nrf",
  "embassy-usb",

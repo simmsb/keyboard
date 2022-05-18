@@ -10,7 +10,7 @@ use embassy::{
     channel::Channel,
     executor::Spawner,
     mutex::Mutex,
-    time::{Duration, Timer},
+    time::{Duration, Timer, Ticker},
     util::{select, Forever},
 };
 use embassy_nrf::{
@@ -32,6 +32,7 @@ use embedded_graphics::{
     text::{Text, TextStyleBuilder},
     Drawable,
 };
+use futures::StreamExt;
 use keyberon::{
     chording::Chording, debounce::Debouncer, key_code::KbHidReport, layout::Event, matrix::Matrix,
 };
@@ -75,8 +76,8 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     while !power.usbregstatus.read().vbusdetect().is_vbus_present() {}
 
-    // let mut cortex_p = cortex_m::Peripherals::take().unwrap();
-    // cortex_p.SCB.enable_icache();
+    let mut cortex_p = cortex_m::Peripherals::take().unwrap();
+    cortex_p.SCB.enable_icache();
 
     let irq = interrupt::take!(USBD);
     let usb_driver = usb::Driver::new(p.USBD, irq);
@@ -156,7 +157,6 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     // let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     // let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
-
     // static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
     // let oled = OLED.put(Mutex::new(Oled::new(twim)));
 
@@ -319,6 +319,7 @@ async fn keyboard_poll_task(
 async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();
+    let mut ticker = Ticker::every(Duration::from_millis(1000 / fps));
 
     for i in (0..255u8).cycle() {
         while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
@@ -329,7 +330,7 @@ async fn led_task(mut leds: Leds) {
 
         leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
 
-        Timer::after(Duration::from_millis(1000 / fps)).await;
+        ticker.next().await;
     }
 }
 
