@@ -6,10 +6,10 @@ use core::sync::atomic::{AtomicU32, AtomicU8};
 
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Channel,
+    channel::{Channel, Receiver},
     executor::Spawner,
     mutex::Mutex,
-    time::{Duration, Timer, Ticker},
+    time::{Duration, Ticker, Timer},
     util::Forever,
 };
 use embassy_nrf::{
@@ -31,8 +31,8 @@ use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::M
 use keyboard_thing::{
     self as _,
     leds::{rainbow_single, Leds, TapWaves},
-    messages::{DomToSub, EventReader, EventSender, SubToDom},
-    oled::{display_timeout_task, Oled, interacted},
+    messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
+    oled::{display_timeout_task, interacted, Oled},
 };
 use ufmt::uwrite;
 
@@ -63,9 +63,10 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P0_08, p.P1_04, uart_config);
-    let (uart_out, uart_in) = uart.split();
-    let events_out = EventSender::new(uart_out);
-    let events_in = EventReader::new(uart_in);
+    static EVENTER: Forever<Eventer<SubToDom, DomToSub, UARTE0>> = Forever::new();
+    static DOM_TO_SUB_CHAN: Channel<ThreadModeRawMutex, DomToSub, 16> = Channel::new();
+    let eventer = EVENTER.put(Eventer::new(uart, DOM_TO_SUB_CHAN.sender()));
+    let (event_sender, event_out_proc, event_in_proc) = eventer.split();
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
@@ -78,23 +79,16 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner
         .spawn(keyboard_poll_task(matrix, debouncer, chording))
         .unwrap();
-    spawner.spawn(read_events_task(events_in)).unwrap();
-    spawner.spawn(send_events_task(events_out)).unwrap();
-}
-
-fn log_e(r: Result<(), display_interface::DisplayError>) {
-    use display_interface::DisplayError::*;
-    match r {
-        Ok(_) => {},
-        Err(InvalidFormatError) => defmt::debug!("Invalid format"),
-        Err(BusWriteError) => defmt::debug!("bus write error"),
-        Err(DCError) => defmt::debug!("dc error"),
-        Err(CSError) => defmt::debug!("cs error"),
-        Err(DataFormatNotImplemented) => defmt::debug!("not impl"),
-        Err(RSError) => defmt::debug!("rs error"),
-        Err(OutOfBoundsError) => defmt::debug!("oob"),
-        Err(_) => defmt::debug!("other error"),
-    }
+    spawner
+        .spawn(read_events_task(DOM_TO_SUB_CHAN.receiver()))
+        .unwrap();
+    spawner.spawn(send_events_task(event_sender)).unwrap();
+    spawner
+        .spawn(process_events_in_task(event_in_proc))
+        .unwrap();
+    spawner
+        .spawn(process_events_out_task(event_out_proc))
+        .unwrap();
 }
 
 #[embassy::task]
@@ -111,7 +105,7 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
     let mut buf: heapless::String<128> = heapless::String::new();
     let mut n = 0u32;
 
-    log_e(oled.lock().await.init().await);
+    let _ = oled.lock().await.init().await;
 
     loop {
         buf.clear();
@@ -122,14 +116,13 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
             n
         );
         let text = Text::with_text_style(&buf, Point::new(0, 15), character_style, text_style);
-        defmt::debug!("about to write to oled");
-        log_e(oled.lock()
+        let _ = oled
+            .lock()
             .await
             .draw(|d| {
                 let _ = text.draw(d);
             })
-            .await);
-        defmt::debug!("written to oled");
+            .await;
 
         n += 1;
         Timer::after(Duration::from_secs(1)).await;
@@ -142,24 +135,32 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
 }
 
 #[embassy::task]
-async fn send_events_task(mut events_out: EventSender<'static, SubToDom, UARTE0>) {
+async fn send_events_task(events_out: EventSender<'static, SubToDom>) {
     loop {
         let evt = COMMAND_CHAN.recv().await;
-        let _ = events_out.send(&evt).await;
+        let _ = events_out.send(evt).await;
     }
 }
 
 #[embassy::task]
-async fn read_events_task(mut events_in: EventReader<'static, DomToSub, UARTE0>) {
-    let mut queue: heapless::spsc::Queue<DomToSub, 8> = heapless::spsc::Queue::new();
+async fn process_events_in_task(
+    mut proc: EventInProcessor<'static, 'static, SubToDom, DomToSub, UARTE0>,
+) {
+    proc.task().await;
+}
 
+#[embassy::task]
+async fn process_events_out_task(mut proc: EventOutProcessor<'static, 'static, SubToDom, UARTE0>) {
+    proc.task().await;
+}
+
+#[embassy::task]
+async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomToSub, 16>) {
     loop {
-        let _ = events_in.read(&mut queue).await;
-        while let Some(event) = queue.dequeue() {
-            match event {
-                DomToSub::ResyncLeds => {
-                    LED_COUNTER.store(0, core::sync::atomic::Ordering::SeqCst);
-                }
+        let event = events_in.recv().await;
+        match event {
+            DomToSub::ResyncLeds => {
+                LED_COUNTER.store(0, core::sync::atomic::Ordering::SeqCst);
             }
         }
     }
@@ -200,7 +201,7 @@ async fn keyboard_poll_task(
             }
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_micros(200)).await;
     }
 }
 

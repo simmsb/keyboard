@@ -12,6 +12,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-cortex-m"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5069e21ec61f3b243a4a4c56d920d3206e6ee86022a67c23e9fe36eb60fc1efd"
+dependencies = [
+ "cortex-m",
+ "linked_list_allocator",
+]
+
+[[package]]
 name = "arraydeque"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -237,7 +247,7 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 [[package]]
 name = "embassy"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "atomic-polyfill",
  "cfg-if",
@@ -256,7 +266,7 @@ dependencies = [
 [[package]]
 name = "embassy-hal-common"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "cortex-m",
  "embassy",
@@ -266,7 +276,7 @@ dependencies = [
 [[package]]
 name = "embassy-macros"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -277,7 +287,7 @@ dependencies = [
 [[package]]
 name = "embassy-nrf"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -304,7 +314,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "defmt",
  "embassy",
@@ -314,7 +324,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-hid"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "defmt",
  "embassy",
@@ -327,7 +337,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-serial"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#3d1501c02038e5fe6f6d3b72bd18bd7a52595a77"
+source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
 dependencies = [
  "defmt",
  "embassy",
@@ -396,12 +406,11 @@ dependencies = [
 
 [[package]]
 name = "embedded-io"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe1572ca75ff2cbb520a8b0b5a9eb589073524748c82e457adb34c6cf0e6af4"
+checksum = "36673b79844ff4ec0e3f00aeca0b2cfff564ff6739ab9801d13f45a8ec6cc1c7"
 dependencies = [
  "defmt",
- "futures",
 ]
 
 [[package]]
@@ -588,6 +597,7 @@ dependencies = [
 name = "keyboard-thing"
 version = "0.1.0"
 dependencies = [
+ "alloc-cortex-m",
  "bbqueue",
  "cortex-m",
  "cortex-m-rt",
@@ -603,6 +613,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal-async",
  "embedded-io",
+ "fnv",
  "futures",
  "heapless",
  "keyberon",
@@ -622,6 +633,12 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+
+[[package]]
+name = "linked_list_allocator"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "822add9edb1860698b79522510da17bef885171f75aa395cff099d770c609c24"
 
 [[package]]
 name = "lock_api"
@@ -811,9 +828,9 @@ checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
 
 [[package]]
 name = "regex"
-version = "1.5.5"
+version = "1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a11647b6b25ff05a515cb92c365cec08801e83423a235b51e231e1808747286"
+checksum = "d83f127d94bdbcda4c8cc2e50f6f84f4b611f69c902699ca385a39c3a75f9ff1"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -822,9 +839,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.6.25"
+version = "0.6.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
+checksum = "49b3de9ec5dc0a3417da371aab17d729997c15010e7fd24ff707773a33bddb64"
 
 [[package]]
 name = "rgb"

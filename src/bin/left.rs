@@ -7,10 +7,10 @@ use core::sync::atomic::AtomicU32;
 
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Channel,
+    channel::{Channel, Receiver},
     executor::Spawner,
     mutex::Mutex,
-    time::{Duration, Timer, Ticker},
+    time::{Duration, Ticker, Timer},
     util::{select, Forever},
 };
 use embassy_nrf::{
@@ -37,10 +37,13 @@ use keyberon::{
     chording::Chording, debounce::Debouncer, key_code::KbHidReport, layout::Event, matrix::Matrix,
 };
 use keyboard_thing::{
-    self as _,
+    self as _, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
-    messages::{DomToSub, EventReader, EventSender, HostToKeyboard, KeyboardToHost, SubToDom},
+    messages::{
+        DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, HostToKeyboard,
+        KeyboardToHost, SubToDom,
+    },
     oled::{display_timeout_task, Oled},
 };
 use postcard::{
@@ -68,6 +71,8 @@ static COMMAND_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
+    init_heap();
+
     let clock: pac::CLOCK = unsafe { core::mem::transmute(()) };
     let power: pac::POWER = unsafe { core::mem::transmute(()) };
 
@@ -123,7 +128,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let hid_config = embassy_usb_hid::Config {
         report_descriptor: KeyboardReport::desc(),
         request_handler: None,
-        poll_ms: 1,
+        poll_ms: 5,
         max_packet_size: 64,
     };
     let hid = HidWriter::<_, 8>::new(&mut builder, &mut res.usb_state, hid_config);
@@ -151,9 +156,11 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
-    let (uart_out, uart_in) = uart.split();
-    let events_out = EventSender::new(uart_out);
-    let events_in = EventReader::new(uart_in);
+
+    static EVENTER: Forever<Eventer<DomToSub, SubToDom, UARTE0>> = Forever::new();
+    static SUB_TO_DOM_CHAN: Channel<ThreadModeRawMutex, SubToDom, 16> = Channel::new();
+    let eventer = EVENTER.put(Eventer::new(uart, SUB_TO_DOM_CHAN.sender()));
+    let (event_sender, event_out_proc, event_in_proc) = eventer.split();
 
     // let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     // let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
@@ -172,8 +179,16 @@ async fn main(spawner: Spawner, p: Peripherals) {
         .unwrap();
     spawner.spawn(keyboard_event_task(layout)).unwrap();
     spawner.spawn(layout_task(layout)).unwrap();
-    spawner.spawn(read_events_task(events_in)).unwrap();
-    spawner.spawn(send_events_task(events_out)).unwrap();
+    spawner
+        .spawn(read_events_task(SUB_TO_DOM_CHAN.receiver()))
+        .unwrap();
+    spawner
+        .spawn(process_events_in_task(event_in_proc))
+        .unwrap();
+    spawner
+        .spawn(process_events_out_task(event_out_proc))
+        .unwrap();
+    spawner.spawn(send_events_task(event_sender)).unwrap();
     spawner.spawn(startup_task()).unwrap();
 }
 
@@ -191,6 +206,8 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
     let mut buf: heapless::String<128> = heapless::String::new();
     let mut n = 0u32;
 
+    let _ = oled.lock().await.init().await;
+
     loop {
         buf.clear();
         let _ = uwrite!(
@@ -201,7 +218,8 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
         );
         let text = Text::with_text_style(&buf, Point::new(20, 30), character_style, text_style);
 
-        oled.lock()
+        let _ = oled
+            .lock()
             .await
             .draw(|d| {
                 let _ = text.draw(d);
@@ -225,25 +243,33 @@ async fn startup_task() {
 }
 
 #[embassy::task]
-async fn send_events_task(mut events_out: EventSender<'static, DomToSub, UARTE0>) {
+async fn send_events_task(events_out: EventSender<'static, DomToSub>) {
     loop {
         let evt = COMMAND_CHAN.recv().await;
-        let _ = events_out.send(&evt).await;
+        let _ = events_out.send(evt).await;
     }
 }
 
 #[embassy::task]
-async fn read_events_task(mut events_in: EventReader<'static, SubToDom, UARTE0>) {
-    let mut queue: heapless::spsc::Queue<SubToDom, 8> = heapless::spsc::Queue::new();
+async fn process_events_in_task(
+    mut proc: EventInProcessor<'static, 'static, DomToSub, SubToDom, UARTE0>,
+) {
+    proc.task().await;
+}
 
+#[embassy::task]
+async fn process_events_out_task(mut proc: EventOutProcessor<'static, 'static, DomToSub, UARTE0>) {
+    proc.task().await;
+}
+
+#[embassy::task]
+async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, SubToDom, 16>) {
     loop {
-        let _ = events_in.read(&mut queue).await;
-        while let Some(event) = queue.dequeue() {
-            // defmt::debug!("Got event from rhs: {:?}", event);
-            if let Some(event) = event.as_keyberon_event() {
-                // events from the other side are already debounced and chord-resolved
-                PROCESSED_KEY_CHAN.send(event).await;
-            }
+        let event = events_in.recv().await;
+        // defmt::debug!("Got event from rhs: {:?}", event);
+        if let Some(event) = event.as_keyberon_event() {
+            // events from the other side are already debounced and chord-resolved
+            PROCESSED_KEY_CHAN.send(event).await;
         }
     }
 }
@@ -265,7 +291,7 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
             }
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_millis(5)).await;
     }
 }
 
@@ -311,7 +337,7 @@ async fn keyboard_poll_task(
             PROCESSED_KEY_CHAN.send(event).await;
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_micros(200)).await;
     }
 }
 
