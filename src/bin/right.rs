@@ -2,7 +2,7 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
-use core::sync::atomic::{AtomicU32, AtomicU8};
+use core::sync::atomic::AtomicU8;
 
 use defmt::debug;
 use embassy::{
@@ -20,13 +20,6 @@ use embassy_nrf::{
     twim::{self, Twim},
     uarte, Peripherals,
 };
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X13, MonoTextStyleBuilder},
-    pixelcolor::BinaryColor,
-    prelude::Point,
-    text::{Text, TextStyleBuilder},
-    Drawable,
-};
 use futures::StreamExt;
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
@@ -35,11 +28,8 @@ use keyboard_thing::{
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
-    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
+    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD, rhs_display::{TOTAL_KEYPRESSES, RHSDisplay, KEYPRESS_SIGNAL},
 };
-use ufmt::uwrite;
-
-static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channels that receive each debounced key press
@@ -102,42 +92,12 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
 #[embassy::task]
 async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
-    let character_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X13)
-        .text_color(BinaryColor::On)
-        .build();
-
-    let text_style = TextStyleBuilder::new()
-        .alignment(embedded_graphics::text::Alignment::Left)
-        .build();
-
-    let mut buf: heapless::String<128> = heapless::String::new();
-    let mut n = 0u32;
-
     Timer::after(Duration::from_millis(100)).await;
     let _ = oled.lock().await.init().await;
     debug!("oled starting up");
 
-    loop {
-        buf.clear();
-        let _ = uwrite!(
-            &mut buf,
-            "keypresses: {}\nticks: {}",
-            TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed),
-            n
-        );
-        let text = Text::with_text_style(&buf, Point::new(0, 15), character_style, text_style);
-        let _ = oled
-            .lock()
-            .await
-            .draw(|d| {
-                let _ = text.draw(d);
-            })
-            .await;
-
-        n += 1;
-        Timer::after(Duration::from_secs(1)).await;
-    }
+    let mut display = RHSDisplay::new(oled);
+    display.run().await;
 }
 
 #[embassy::task]
@@ -209,6 +169,7 @@ async fn keyboard_poll_task(
             COMMAND_CHAN.send(msg).await;
             if event.is_press() {
                 TOTAL_KEYPRESSES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                KEYPRESS_SIGNAL.signal(());
             }
         }
 

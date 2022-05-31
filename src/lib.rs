@@ -11,6 +11,7 @@ pub mod leds;
 pub mod matrix;
 pub mod messages;
 pub mod oled;
+pub mod rhs_display;
 
 use core::alloc::Layout;
 
