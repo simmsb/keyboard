@@ -45,6 +45,7 @@ use keyboard_thing::{
         KeyboardToHost, SubToDom,
     },
     oled::{display_timeout_task, Oled},
+    POLL_PERIOD, UART_BAUD, DEBOUNCER_TICKS,
 };
 use postcard::{
     flavors::{Cobs, Slice},
@@ -88,8 +89,8 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let usb_driver = usb::Driver::new(p.USBD, irq);
 
     let mut config = embassy_usb::Config::new(0x6969, 0x0420);
-    config.manufacturer.replace("test");
-    config.product.replace("test");
+    config.manufacturer.replace("Dick");
+    config.product.replace("Sniffer");
     config.serial_number.replace("69420");
     config.max_power = 500;
     config.max_packet_size_0 = 64;
@@ -128,7 +129,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let hid_config = embassy_usb_hid::Config {
         report_descriptor: KeyboardReport::desc(),
         request_handler: None,
-        poll_ms: 5,
+        poll_ms: 1,
         max_packet_size: 64,
     };
     let hid = HidWriter::<_, 8>::new(&mut builder, &mut res.usb_state, hid_config);
@@ -143,7 +144,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let debouncer = Debouncer::new(
         [[false; COLS_PER_SIDE]; ROWS],
         [[false; COLS_PER_SIDE]; ROWS],
-        30,
+        DEBOUNCER_TICKS,
     );
     let chording = Chording::new(&keyboard_thing::layout::CHORDS);
 
@@ -152,7 +153,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     let mut uart_config = uarte::Config::default();
     uart_config.parity = uarte::Parity::EXCLUDED;
-    uart_config.baudrate = uarte::Baudrate::BAUD1M;
+    uart_config.baudrate = UART_BAUD;
 
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
@@ -291,7 +292,7 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
             }
         }
 
-        Timer::after(Duration::from_millis(5)).await;
+        Timer::after(Duration::from_millis(1)).await;
     }
 }
 
@@ -337,7 +338,7 @@ async fn keyboard_poll_task(
             PROCESSED_KEY_CHAN.send(event).await;
         }
 
-        Timer::after(Duration::from_micros(200)).await;
+        Timer::after(POLL_PERIOD).await;
     }
 }
 

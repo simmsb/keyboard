@@ -17,9 +17,16 @@ use core::alloc::Layout;
 use alloc_cortex_m::CortexMHeap;
 
 #[cfg(feature = "debugger")]
-use defmt_rtt as _; // global logger
+use defmt_rtt as _;
+use embassy::time::Duration;
+use embassy_nrf::uarte;
+// global logger
 #[cfg(feature = "debugger")]
 use panic_probe as _;
+
+pub const UART_BAUD: uarte::Baudrate = uarte::Baudrate::BAUD1M;
+pub const POLL_PERIOD: Duration = Duration::from_micros(500);
+pub const DEBOUNCER_TICKS: u16 = 10;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;

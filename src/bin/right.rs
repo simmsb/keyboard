@@ -4,6 +4,7 @@
 
 use core::sync::atomic::{AtomicU32, AtomicU8};
 
+use defmt::debug;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::{Channel, Receiver},
@@ -29,10 +30,12 @@ use embedded_graphics::{
 use futures::StreamExt;
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
-    self as _,
+    self as _, init_heap,
+    layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
+    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
 use ufmt::uwrite;
 
@@ -48,18 +51,24 @@ static LED_COUNTER: AtomicU8 = AtomicU8::new(0);
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
+    init_heap();
+
     let mut cortex_p = cortex_m::Peripherals::take().unwrap();
     cortex_p.SCB.enable_icache();
 
     let leds = Leds::new(p.PWM0, p.P0_06);
 
     let matrix = keyboard_thing::build_matrix!(p);
-    let debouncer = Debouncer::new([[false; 6]; 4], [[false; 6]; 4], 30);
+    let debouncer = Debouncer::new(
+        [[false; COLS_PER_SIDE]; ROWS],
+        [[false; COLS_PER_SIDE]; ROWS],
+        DEBOUNCER_TICKS,
+    );
     let chording = Chording::new(&keyboard_thing::layout::CHORDS);
 
     let mut uart_config = uarte::Config::default();
     uart_config.parity = uarte::Parity::EXCLUDED;
-    uart_config.baudrate = uarte::Baudrate::BAUD1M;
+    uart_config.baudrate = UART_BAUD;
 
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P0_08, p.P1_04, uart_config);
@@ -192,8 +201,8 @@ async fn keyboard_poll_task(
 
         for event in events {
             let msg = match event {
-                keyberon::layout::Event::Press(x, y) => SubToDom::KeyPressed(x, y),
-                keyberon::layout::Event::Release(x, y) => SubToDom::KeyReleased(x, y),
+                keyberon::layout::Event::Press(x, y) => SubToDom::key_pressed(x, y),
+                keyberon::layout::Event::Release(x, y) => SubToDom::key_released(x, y),
             };
             COMMAND_CHAN.send(msg).await;
             if event.is_press() {
@@ -201,7 +210,7 @@ async fn keyboard_poll_task(
             }
         }
 
-        Timer::after(Duration::from_micros(200)).await;
+        Timer::after(POLL_PERIOD).await;
     }
 }
 

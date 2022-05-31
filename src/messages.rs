@@ -1,15 +1,21 @@
 use alloc::sync::Arc;
-use core::hash::{Hash, Hasher};
-use core::sync::atomic::AtomicU16;
-use embassy::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy::channel::{Channel, Sender, Signal};
-use embassy::mutex::Mutex;
-use embassy::time::{with_timeout, Duration};
+use core::{
+    hash::{Hash, Hasher},
+    sync::atomic::AtomicU8,
+};
+use defmt::{debug, warn};
+use embassy::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::{Channel, Sender, Signal},
+    mutex::Mutex,
+    time::{with_timeout, Duration},
+};
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
-use postcard::flavors::{Cobs, Slice};
-use postcard::CobsAccumulator;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use postcard::{
+    flavors::{Cobs, Slice},
+    CobsAccumulator,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum DomToSub {
@@ -18,8 +24,29 @@ pub enum DomToSub {
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, defmt::Format, Hash, Clone)]
 pub enum SubToDom {
-    KeyPressed(u8, u8),
-    KeyReleased(u8, u8),
+    KeyPressed(u8),
+    KeyReleased(u8),
+}
+
+impl SubToDom {
+    pub fn as_keyberon_event(&self) -> Option<keyberon::layout::Event> {
+        match self {
+            SubToDom::KeyPressed(v) => {
+                Some(keyberon::layout::Event::Press((v >> 4) & 0xf, v & 0xf))
+            }
+            SubToDom::KeyReleased(v) => {
+                Some(keyberon::layout::Event::Release((v >> 4) & 0xf, v & 0xf))
+            }
+        }
+    }
+
+    pub fn key_pressed(x: u8, y: u8) -> Self {
+        Self::KeyPressed(((x & 0xf) << 4) | (y & 0xf))
+    }
+
+    pub fn key_released(x: u8, y: u8) -> Self {
+        Self::KeyReleased(((x & 0xf) << 4) | (y & 0xf))
+    }
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq)]
@@ -33,25 +60,26 @@ pub enum KeyboardToHost {
     Log(heapless::Vec<u8, 60>),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, defmt::Format)]
 struct Command<T> {
-    uuid: u16,
-    csum: u16,
+    uuid: u8,
+    csum: u8,
     cmd: T,
 }
 
-fn csum<T: Hash>(v: T) -> u16 {
+fn csum<T: Hash>(v: T) -> u8 {
     let mut hasher = fnv::FnvHasher::default();
     v.hash(&mut hasher);
     let checksum = hasher.finish();
     let checksum = (checksum >> 32) as u32 ^ checksum as u32;
     let checksum = (checksum >> 16) as u16 ^ checksum as u16;
+    let checksum = (checksum >> 8) as u8 ^ checksum as u8;
     checksum
 }
 
 impl<T: Hash> Command<T> {
     fn new(cmd: T) -> Self {
-        static UUID_GEN: AtomicU16 = AtomicU16::new(0);
+        static UUID_GEN: AtomicU8 = AtomicU8::new(0);
         let uuid = UUID_GEN.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         let csum = csum((&cmd, uuid));
         Self { uuid, csum, cmd }
@@ -77,13 +105,13 @@ impl<T: Hash> Command<T> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, defmt::Format)]
 pub struct Ack {
-    uuid: u16,
-    csum: u16,
+    uuid: u8,
+    csum: u8,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, defmt::Format)]
 enum CmdOrAck<T> {
     Cmd(Command<T>),
     Ack(Ack),
@@ -102,15 +130,6 @@ impl Ack {
 
 const BUF_SIZE: usize = 128;
 
-impl SubToDom {
-    pub fn as_keyberon_event(&self) -> Option<keyberon::layout::Event> {
-        match self {
-            SubToDom::KeyPressed(x, y) => Some(keyberon::layout::Event::Press(*x, *y)),
-            SubToDom::KeyReleased(x, y) => Some(keyberon::layout::Event::Release(*x, *y)),
-        }
-    }
-}
-
 pub struct Eventer<'a, T, U, UT: Instance> {
     tx: UarteTx<'a, UT>,
     rx: UarteRx<'a, UT>,
@@ -118,7 +137,7 @@ pub struct Eventer<'a, T, U, UT: Instance> {
     out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
     waiters: Mutex<
         ThreadModeRawMutex,
-        heapless::FnvIndexMap<u16, Arc<embassy::channel::Signal<()>>, 128>,
+        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
     >,
 }
 
@@ -126,7 +145,7 @@ pub struct EventSender<'e, T> {
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
     waiters: &'e Mutex<
         ThreadModeRawMutex,
-        heapless::FnvIndexMap<u16, Arc<embassy::channel::Signal<()>>, 128>,
+        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
     >,
 }
 
@@ -141,11 +160,15 @@ pub struct EventInProcessor<'a, 'e, T, U, UT: Instance> {
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
     waiters: &'e Mutex<
         ThreadModeRawMutex,
-        heapless::FnvIndexMap<u16, Arc<embassy::channel::Signal<()>>, 128>,
+        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
     >,
 }
 
-impl<'a, 'e, T, U: DeserializeOwned + Hash, UT: Instance> EventInProcessor<'a, 'e, T, U, UT> {
+impl<'a, 'e, T, U, UT> EventInProcessor<'a, 'e, T, U, UT>
+where
+    U: DeserializeOwned + Hash + defmt::Format,
+    UT: Instance,
+{
     async fn recv_task_inner(&mut self) -> Option<()> {
         let mut accumulator = CobsAccumulator::<BUF_SIZE>::new();
 
@@ -158,23 +181,32 @@ impl<'a, 'e, T, U: DeserializeOwned + Hash, UT: Instance> EventInProcessor<'a, '
                 window = match accumulator.feed(window) {
                     postcard::FeedResult::Consumed => break 'cobs,
                     postcard::FeedResult::OverFull(buf) => buf,
-                    postcard::FeedResult::DeserError(buf) => buf,
+                    postcard::FeedResult::DeserError(buf) => {
+                        warn!("Message decoder failed to deserialize a message");
+                        buf
+                    }
                     postcard::FeedResult::Success { data, remaining } => {
                         let data: CmdOrAck<U> = data;
 
                         match data {
                             CmdOrAck::Cmd(c) => {
                                 if let Some(c) = c.validate() {
+                                    debug!("Received command: {:?}", c);
                                     self.mix_chan.send(CmdOrAck::Ack(c.ack())).await;
                                     self.out_chan.send(c.cmd).await;
+                                } else {
+                                    warn!("Corrupted parsed command");
                                 }
                             }
                             CmdOrAck::Ack(a) => {
                                 if let Some(a) = a.validate() {
+                                    debug!("Received ack: {:?}", a);
                                     let mut waiters = self.waiters.lock().await;
                                     if let Some(waker) = waiters.remove(&a.uuid) {
                                         waker.signal(());
                                     }
+                                } else {
+                                    warn!("Corrupted parsed ack");
                                 }
                             }
                         }
@@ -193,7 +225,11 @@ impl<'a, 'e, T, U: DeserializeOwned + Hash, UT: Instance> EventInProcessor<'a, '
     }
 }
 
-impl<'a, 'e, T: Serialize, UT: Instance> EventOutProcessor<'a, 'e, T, UT> {
+impl<'a, 'e, T, UT> EventOutProcessor<'a, 'e, T, UT>
+where
+    T: Serialize + defmt::Format,
+    UT: Instance,
+{
     pub async fn task(&mut self) {
         loop {
             let val = self.mix_chan.recv().await;
@@ -203,7 +239,8 @@ impl<'a, 'e, T: Serialize, UT: Instance> EventOutProcessor<'a, 'e, T, UT> {
                 postcard::serialize_with_flavor(&val, Cobs::try_new(Slice::new(&mut buf)).unwrap())
                     .ok()
             {
-                let _ = self.tx.write(buf).await.ok();
+                let r = self.tx.write(buf).await;
+                debug!("Transmitted {:?}, r: {:?}", val, r);
             }
         }
     }
@@ -217,16 +254,20 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
             let waiter: Arc<Signal<()>> = self.register_waiter(uuid).await;
             self.mix_chan.send(CmdOrAck::Cmd(cmd)).await;
 
-            match with_timeout(Duration::from_millis(100), waiter.wait()).await {
-                Ok(_) => return,
+            match with_timeout(Duration::from_millis(4), waiter.wait()).await {
+                Ok(_) => {
+                    debug!("Waiter for uuid {} completed", uuid);
+                    return;
+                }
                 Err(_) => {
+                    warn!("Waiter for uuid{} timing out", uuid);
                     self.deregister_waiter(uuid).await;
                 }
             }
         }
     }
 
-    async fn register_waiter(&self, uuid: u16) -> Arc<Signal<()>> {
+    async fn register_waiter(&self, uuid: u8) -> Arc<Signal<()>> {
         let signal = Arc::new(Signal::<()>::new());
         let mut waiters = self.waiters.lock().await;
         if let Ok(_) = waiters.insert(uuid, signal.clone()) {
@@ -236,7 +277,7 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
         }
     }
 
-    async fn deregister_waiter(&self, uuid: u16) {
+    async fn deregister_waiter(&self, uuid: u8) {
         self.waiters.lock().await.remove(&uuid);
     }
 }

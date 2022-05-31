@@ -15,7 +15,7 @@ const ALT_TAB: Action<CustomEvent> = Action::HoldTap {
     timeout: 200,
     hold: &k(KeyCode::LAlt),
     tap: &k(KeyCode::Tab),
-    config: keyberon::action::HoldTapConfig::Default,
+    config: keyberon::action::HoldTapConfig::HoldOnOtherKeyPress,
     tap_hold_interval: 0,
 };
 
@@ -23,7 +23,7 @@ const L1_SP: Action<CustomEvent> = Action::HoldTap {
     timeout: 200,
     hold: &l(1),
     tap: &k(KeyCode::Space),
-    config: keyberon::action::HoldTapConfig::Default,
+    config: keyberon::action::HoldTapConfig::HoldOnOtherKeyPress,
     tap_hold_interval: 0,
 };
 
@@ -31,7 +31,7 @@ const L2_SP: Action<CustomEvent> = Action::HoldTap {
     timeout: 200,
     hold: &l(2),
     tap: &k(KeyCode::Space),
-    config: keyberon::action::HoldTapConfig::Default,
+    config: keyberon::action::HoldTapConfig::HoldOnOtherKeyPress,
     tap_hold_interval: 0,
 };
 
