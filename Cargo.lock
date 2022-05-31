@@ -186,9 +186,9 @@ dependencies = [
 
 [[package]]
 name = "defmt"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9252abe43d4c0a5df0c5c865129fa8daad338bb33357ba40023a37cd34b4a7b9"
+checksum = "d3a0ae7494d9bff013d7b89471f4c424356a71e9752e0c78abe7e6c608a16bb3"
 dependencies = [
  "bitflags",
  "defmt-macros",
@@ -247,7 +247,7 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 [[package]]
 name = "embassy"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "atomic-polyfill",
  "cfg-if",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "embassy-hal-common"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "cortex-m",
  "embassy",
@@ -276,7 +276,7 @@ dependencies = [
 [[package]]
 name = "embassy-macros"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "embassy-nrf"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -314,7 +314,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "defmt",
  "embassy",
@@ -324,7 +324,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-hid"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "defmt",
  "embassy",
@@ -337,7 +337,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-serial"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#36a1f203648dcb402727ea3eb5d30cf1f6993795"
+source = "git+https://github.com/embassy-rs/embassy#a0d43c863dd9859e94e5d202d5b5bb6b107f152c"
 dependencies = [
  "defmt",
  "embassy",
@@ -397,9 +397,9 @@ dependencies = [
 
 [[package]]
 name = "embedded-hal-async"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9f684248ddba6d9f33c40386e7d8954ec13ad3c49705af3264cf995cce5abd"
+checksum = "022249738afde9b2b755a28a367ae20c9367e8e9c24b9aaf60bcc9255a255ec5"
 dependencies = [
  "embedded-hal 1.0.0-alpha.8",
 ]
