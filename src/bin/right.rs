@@ -114,7 +114,9 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
     let mut buf: heapless::String<128> = heapless::String::new();
     let mut n = 0u32;
 
+    Timer::after(Duration::from_millis(100)).await;
     let _ = oled.lock().await.init().await;
+    debug!("oled starting up");
 
     loop {
         buf.clear();

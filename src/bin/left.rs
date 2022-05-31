@@ -239,7 +239,7 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
 
 #[embassy::task]
 async fn startup_task() {
-    Timer::after(Duration::from_millis(100)).await;
+    Timer::after(Duration::from_millis(1000)).await;
     COMMAND_CHAN.send(DomToSub::ResyncLeds).await;
 }
 
