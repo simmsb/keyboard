@@ -5,6 +5,7 @@
 
 use core::sync::atomic::AtomicU32;
 
+use defmt::debug;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::{Channel, Receiver},
@@ -138,7 +139,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     let usb = builder.build();
 
-    defmt::debug!("hello");
+    debug!("hello");
 
     let leds = Leds::new(p.PWM0, p.P0_06);
 
@@ -241,7 +242,6 @@ async fn process_events_out_task(mut proc: EventOutProcessor<'static, 'static, D
 async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, SubToDom, 16>) {
     loop {
         let event = events_in.recv().await;
-        // defmt::debug!("Got event from rhs: {:?}", event);
         if let Some(event) = event.as_keyberon_event() {
             // events from the other side are already debounced and chord-resolved
             PROCESSED_KEY_CHAN.send(event).await;
@@ -279,9 +279,9 @@ async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>)
         {
             let mut layout = layout.lock().await;
             layout.event(event);
-            defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
+            debug!("evt: press: {} {:?}", event.is_press(), event.coord());
             while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
-                defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
+                debug!("evt: press: {} {:?}", event.is_press(), event.coord());
                 layout.event(event);
             }
         }

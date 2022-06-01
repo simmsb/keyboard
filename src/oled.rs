@@ -1,5 +1,6 @@
 use core::sync::atomic::AtomicBool;
 
+use defmt::debug;
 use display_interface::DisplayError;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
@@ -44,7 +45,10 @@ impl<'a, T: Instance> Oled<'a, T> {
         Ok(())
     }
 
-    pub async fn draw(&mut self, f: impl FnOnce(&mut OledDisplay<'a, T>)) -> Result<(), DisplayError> {
+    pub async fn draw(
+        &mut self,
+        f: impl FnOnce(&mut OledDisplay<'a, T>),
+    ) -> Result<(), DisplayError> {
         self.display.clear();
         f(&mut self.display);
         self.display.flush().await?;
@@ -56,7 +60,7 @@ impl<'a, T: Instance> Oled<'a, T> {
             return Ok(());
         }
 
-        defmt::debug!("Turning display on");
+        debug!("Turning display on");
 
         self.display.set_brightness(Brightness::DIMMEST).await?;
         self.display.set_display_on(true).await?;
@@ -81,7 +85,7 @@ impl<'a, T: Instance> Oled<'a, T> {
             return Ok(());
         }
 
-        defmt::debug!("Turning display off");
+        debug!("Turning display off");
 
         self.display.set_brightness(Brightness::BRIGHTEST).await?;
 
@@ -104,8 +108,8 @@ impl<'a, T: Instance> Oled<'a, T> {
 }
 
 pub const OLED_TIMEOUT: Duration = Duration::from_secs(30);
-pub static INTERACTED: AtomicBool = AtomicBool::new(true);
-pub static INTERACTED_SIG: Signal<()> = Signal::new();
+static INTERACTED: AtomicBool = AtomicBool::new(true);
+static INTERACTED_SIG: Signal<()> = Signal::new();
 
 pub fn interacted() {
     INTERACTED.store(true, core::sync::atomic::Ordering::Relaxed);
@@ -125,10 +129,14 @@ where
         select(set_noninteracted(), INTERACTED_SIG.wait()).await;
         INTERACTED_SIG.reset();
 
-        if INTERACTED.load(core::sync::atomic::Ordering::Relaxed) {
+        let load = INTERACTED.load(core::sync::atomic::Ordering::Relaxed);
+        debug!("display timeout tick: {}", load);
+
+        if load {
             let _ = oled.lock().await.set_on().await;
         } else {
             let _ = oled.lock().await.set_off().await;
         }
+        debug!("display timeout tick over: {}", load);
     }
 }

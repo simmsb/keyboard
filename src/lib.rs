@@ -6,13 +6,13 @@
 
 extern crate alloc;
 
+pub mod cpm;
 pub mod layout;
 pub mod leds;
 pub mod matrix;
 pub mod messages;
 pub mod oled;
 pub mod rhs_display;
-pub mod cpm;
 
 use core::alloc::Layout;
 

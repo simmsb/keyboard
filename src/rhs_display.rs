@@ -45,7 +45,7 @@ impl RHSDisplay {
             oled,
             sample_buffer,
             sec_ticker: Ticker::every(Duration::from_secs(1)),
-            upd_ticker: Ticker::every(Duration::from_millis(32)),
+            upd_ticker: Ticker::every(Duration::from_millis(100)),
             buf: Default::default(),
             ticks: 0,
         }
@@ -95,17 +95,19 @@ impl RHSDisplay {
                     .collect::<heapless::Vec<_, 32>>()
             };
 
-            let _ = self
-                .oled
-                .lock()
-                .await
-                .draw(move |d| {
-                    let _ = text_box.draw(d);
-                    for line in lines {
-                        let _ = line.draw(d);
-                    }
-                })
-                .await;
+            {
+                let _ = self
+                    .oled
+                    .lock()
+                    .await
+                    .draw(move |d| {
+                        let _ = text_box.draw(d);
+                        for line in lines {
+                            let _ = line.draw(d);
+                        }
+                    })
+                    .await;
+            }
 
             select(Self::wait_for_signal(), self.tick_update()).await;
         }

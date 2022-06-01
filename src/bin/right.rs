@@ -100,11 +100,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
 }
 
 #[embassy::task]
-async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
-                   cpm_samples: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
+async fn oled_task(
+    oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
+    cpm_samples: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
 ) {
     Timer::after(Duration::from_millis(100)).await;
-    let _ = oled.lock().await.init().await;
+    {
+        let _ = oled.lock().await.init().await;
+    }
     debug!("oled starting up");
 
     let mut display = RHSDisplay::new(oled, cpm_samples);

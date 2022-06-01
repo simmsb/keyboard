@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! build_matrix {
     ($p:ident) => {{
-        use embassy_nrf::gpio::{Input, Level, OutputDrive, Pull, Pin};
+        use embassy_nrf::gpio::{Input, Level, OutputDrive, Pin, Pull};
         use keyberon::matrix::Matrix;
         Matrix::new(
             [
