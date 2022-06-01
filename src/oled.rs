@@ -39,6 +39,7 @@ impl<'a, T: Instance> Oled<'a, T> {
 
     pub async fn init(&mut self) -> Result<(), DisplayError> {
         self.display.set_rotation(DisplayRotation::Rotate90).await?;
+        self.display.set_brightness(Brightness::BRIGHTEST).await?;
         self.display.init().await?;
         Ok(())
     }

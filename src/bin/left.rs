@@ -16,8 +16,7 @@ use embassy::{
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt, pac,
-    peripherals::{self, TWISPI0, UARTE0},
-    twim::{self, Twim},
+    peripherals::{self, UARTE0},
     uarte,
     usb::{self, Driver},
     Peripherals,
@@ -25,17 +24,8 @@ use embassy_nrf::{
 use embassy_usb::UsbDevice;
 use embassy_usb_hid::HidWriter;
 use embassy_usb_serial::CdcAcmClass;
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X13, MonoTextStyleBuilder},
-    pixelcolor::BinaryColor,
-    prelude::Point,
-    text::{Text, TextStyleBuilder},
-    Drawable,
-};
 use futures::StreamExt;
-use keyberon::{
-    chording::Chording, debounce::Debouncer, key_code::KbHidReport, layout::Event, matrix::Matrix,
-};
+use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
     self as _, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
@@ -44,16 +34,15 @@ use keyboard_thing::{
         DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, HostToKeyboard,
         KeyboardToHost, SubToDom,
     },
-    oled::{display_timeout_task, Oled},
-    POLL_PERIOD, UART_BAUD, DEBOUNCER_TICKS,
+    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
+use num_enum::TryFromPrimitive;
+use packed_struct::PackedStruct;
 use postcard::{
     flavors::{Cobs, Slice},
     CobsAccumulator,
 };
-
-use ufmt::uwrite;
-use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
+use usbd_human_interface_device::{device::keyboard::NKROBootKeyboardReport, page::Keyboard};
 
 static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 
@@ -66,9 +55,17 @@ static LOG_CHAN: Channel<ThreadModeRawMutex, &'static str, 16> = Channel::new();
 /// Key events that have been chorded or received from the other side
 static PROCESSED_KEY_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channel HID events are put on to be sent to the computer
-static HID_CHAN: Channel<ThreadModeRawMutex, KbHidReport, 1> = Channel::new();
+static HID_CHAN: Channel<ThreadModeRawMutex, NKROBootKeyboardReport, 1> = Channel::new();
 /// Channel commands are put on to be sent to the other side
 static COMMAND_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
+
+trait StaticLen {
+    const LEN: usize;
+}
+
+impl<T, const N: usize> StaticLen for [T; N] {
+    const LEN: usize = N;
+}
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
@@ -127,12 +124,17 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let serial_class = CdcAcmClass::new(&mut builder, &mut res.serial_state, 64);
 
     let hid_config = embassy_usb_hid::Config {
-        report_descriptor: KeyboardReport::desc(),
+        report_descriptor:
+            usbd_human_interface_device::device::keyboard::NKRO_BOOT_KEYBOARD_REPORT_DESCRIPTOR,
         request_handler: None,
         poll_ms: 1,
         max_packet_size: 64,
     };
-    let hid = HidWriter::<_, 8>::new(&mut builder, &mut res.usb_state, hid_config);
+    let hid = HidWriter::<_, { <NKROBootKeyboardReport as PackedStruct>::ByteArray::LEN }>::new(
+        &mut builder,
+        &mut res.usb_state,
+        hid_config,
+    );
 
     let usb = builder.build();
 
@@ -163,13 +165,6 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let eventer = EVENTER.put(Eventer::new(uart, SUB_TO_DOM_CHAN.sender()));
     let (event_sender, event_out_proc, event_in_proc) = eventer.split();
 
-    // let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
-    // let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
-    // static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
-    // let oled = OLED.put(Mutex::new(Oled::new(twim)));
-
-    // spawner.spawn(oled_task(oled)).unwrap();
-    // spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(usb_serial_task(serial_class)).unwrap();
     spawner.spawn(hid_task(hid)).unwrap();
@@ -191,50 +186,29 @@ async fn main(spawner: Spawner, p: Peripherals) {
         .unwrap();
     spawner.spawn(send_events_task(event_sender)).unwrap();
     spawner.spawn(startup_task()).unwrap();
+    spawner.spawn(sync_kp_task()).unwrap();
 }
 
 #[embassy::task]
-async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
-    let character_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X13)
-        .text_color(BinaryColor::On)
-        .build();
-
-    let text_style = TextStyleBuilder::new()
-        .alignment(embedded_graphics::text::Alignment::Center)
-        .build();
-
-    let mut buf: heapless::String<128> = heapless::String::new();
-    let mut n = 0u32;
-
-    let _ = oled.lock().await.init().await;
+async fn sync_kp_task() {
+    Timer::after(Duration::from_millis(1000)).await;
+    let mut ticker = Ticker::every(Duration::from_millis(100));
+    let mut last = 0u32;
 
     loop {
-        buf.clear();
-        let _ = uwrite!(
-            &mut buf,
-            "keypresses: {}\nticks: {}",
-            TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed),
-            n
-        );
-        let text = Text::with_text_style(&buf, Point::new(20, 30), character_style, text_style);
+        let current = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
+        let diff = current - last;
 
-        let _ = oled
-            .lock()
-            .await
-            .draw(|d| {
-                let _ = text.draw(d);
-            })
-            .await;
+        if diff != 0 {
+            COMMAND_CHAN
+                .send(DomToSub::SyncKeypresses(diff as u16))
+                .await;
+        }
 
-        n += 1;
-        Timer::after(Duration::from_secs(1)).await;
+        last = current;
+
+        ticker.next().await;
     }
-}
-
-#[embassy::task]
-async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
-    display_timeout_task(oled).await;
 }
 
 #[embassy::task]
@@ -283,12 +257,14 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
             let mut layout = layout.lock().await;
             layout.tick();
 
-            let collect: KbHidReport = layout.keycodes().collect();
+            let collect = layout
+                .keycodes()
+                .filter_map(|k| Keyboard::try_from_primitive(k as u8).ok())
+                .collect::<heapless::Vec<_, 24>>();
 
             if last_report.as_ref() != Some(&collect) {
-                defmt::debug!("hid report: {}", collect.as_bytes());
                 last_report = Some(collect.clone());
-                HID_CHAN.send(collect.clone()).await;
+                HID_CHAN.send(NKROBootKeyboardReport::new(&collect)).await;
             }
         }
 
@@ -304,13 +280,10 @@ async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>)
             let mut layout = layout.lock().await;
             layout.event(event);
             defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
-            let mut total = 1;
             while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
                 defmt::debug!("evt: press: {} {:?}", event.is_press(), event.coord());
                 layout.event(event);
-                total += 1;
             }
-            TOTAL_KEYPRESSES.fetch_add(total, core::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -333,6 +306,11 @@ async fn keyboard_poll_task(
         }
 
         let events = chording.tick(events);
+
+        TOTAL_KEYPRESSES.fetch_add(
+            events.iter().filter(|e| e.is_press()).count() as u32,
+            core::sync::atomic::Ordering::Relaxed,
+        );
 
         for event in events {
             PROCESSED_KEY_CHAN.send(event).await;
@@ -364,10 +342,16 @@ async fn led_task(mut leds: Leds) {
 type UsbDriver = Driver<'static, peripherals::USBD>;
 
 #[embassy::task]
-async fn hid_task(mut hid: HidWriter<'static, UsbDriver, 8>) {
+async fn hid_task(
+    mut hid: HidWriter<
+        'static,
+        UsbDriver,
+        { <NKROBootKeyboardReport as PackedStruct>::ByteArray::LEN },
+    >,
+) {
     loop {
         let report = HID_CHAN.recv().await;
-        let _ = hid.write(report.as_bytes()).await;
+        let _ = hid.write(&report.pack().unwrap()).await;
     }
 }
 

@@ -12,6 +12,7 @@ pub mod matrix;
 pub mod messages;
 pub mod oled;
 pub mod rhs_display;
+pub mod cpm;
 
 use core::alloc::Layout;
 
@@ -27,7 +28,7 @@ use panic_probe as _;
 
 pub const UART_BAUD: uarte::Baudrate = uarte::Baudrate::BAUD1M;
 pub const POLL_PERIOD: Duration = Duration::from_micros(500);
-pub const DEBOUNCER_TICKS: u16 = 10;
+pub const DEBOUNCER_TICKS: u16 = 20;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;

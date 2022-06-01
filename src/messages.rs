@@ -20,6 +20,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum DomToSub {
     ResyncLeds,
+    Reset,
+    SyncKeypresses(u16),
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, defmt::Format, Hash, Clone)]
@@ -37,6 +39,7 @@ impl SubToDom {
             SubToDom::KeyReleased(v) => {
                 Some(keyberon::layout::Event::Release((v >> 4) & 0xf, v & 0xf))
             }
+            _ => None,
         }
     }
 

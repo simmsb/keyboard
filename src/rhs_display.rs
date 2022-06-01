@@ -1,5 +1,6 @@
 use core::sync::atomic::AtomicU32;
 
+use atomic_float::AtomicF32;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::Signal,
@@ -12,15 +13,18 @@ use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::BinaryColor,
     prelude::{Point, Size},
-    primitives::Rectangle, Drawable,
+    primitives::Rectangle,
+    Drawable,
 };
 use embedded_text::{style::TextBoxStyleBuilder, TextBox};
 use futures::StreamExt;
+use micromath::F32Ext;
 use ufmt::uwriteln;
 
 use crate::oled::Oled;
 
 pub static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
+pub static AVERAGE_KEYPRESSES: AtomicF32 = AtomicF32::new(0.0);
 pub static KEYPRESS_SIGNAL: Signal<()> = Signal::new();
 
 pub struct RHSDisplay {
@@ -54,8 +58,15 @@ impl RHSDisplay {
             self.buf.clear();
 
             let kp = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
+            let cps = AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
+            let cps = f32::trunc(cps * 10.0) / 10.0;
+            let mut fp_buf = dtoa::Buffer::new();
+            let cps = fp_buf.format_finite(cps);
+
             let _ = uwriteln!(&mut self.buf, "kp:");
             let _ = uwriteln!(&mut self.buf, "{}", kp);
+            let _ = uwriteln!(&mut self.buf, "cps:");
+            let _ = uwriteln!(&mut self.buf, "{}/s", cps);
             let _ = uwriteln!(&mut self.buf, "tick:");
             let _ = uwriteln!(&mut self.buf, "{}", self.ticks);
 

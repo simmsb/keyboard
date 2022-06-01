@@ -28,7 +28,8 @@ use keyboard_thing::{
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
-    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD, rhs_display::{TOTAL_KEYPRESSES, RHSDisplay, KEYPRESS_SIGNAL},
+    rhs_display::{RHSDisplay, KEYPRESS_SIGNAL, TOTAL_KEYPRESSES, AVERAGE_KEYPRESSES},
+    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD, cpm::{Cpm, cpm_task},
 };
 
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
@@ -71,7 +72,9 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
     static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
     let oled = OLED.put(Mutex::new(Oled::new(twim)));
+    let cpm = Cpm::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES);
 
+    spawner.spawn(cpm_task(cpm)).unwrap();
     spawner.spawn(oled_task(oled)).unwrap();
     spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
@@ -133,6 +136,16 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
             DomToSub::ResyncLeds => {
                 LED_COUNTER.store(0, core::sync::atomic::Ordering::SeqCst);
             }
+            DomToSub::Reset => {
+                cortex_m::peripheral::SCB::sys_reset();
+            }
+            DomToSub::SyncKeypresses(kp) => {
+                if kp != 0 {
+                    TOTAL_KEYPRESSES.fetch_add(kp as u32, core::sync::atomic::Ordering::Relaxed);
+                    KEYPRESS_SIGNAL.signal(());
+                    interacted();
+                }
+            },
         }
     }
 }

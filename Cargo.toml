@@ -14,7 +14,7 @@ harness = false
 
 [dependencies]
 bbqueue = "0.5.1"
-cortex-m = { version = "0.7.4", features = ["linker-plugin-lto"] }
+cortex-m = { version = "0.7.5", features = ["linker-plugin-lto", "inline-asm"] }
 defmt = "0.3.2"
 embassy = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote"] }
@@ -43,6 +43,11 @@ display-interface = { git = "https://github.com/simmsb/display-interface.git", v
 fnv = { version = "1.0.7", default-features = false }
 alloc-cortex-m = "0.4.2"
 embedded-text = { version = "0.5.0", default-features = false }
+usbd-human-interface-device = "0.2.0"
+num_enum = { version = "0.5.7", default-features = false }
+packed_struct = { version = "0.10.0", default-features = false }
+atomic_float = { version = "0.1.0", default-features = false }
+dtoa = "1.0.2"
 
 # [patch.crates-io]
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
@@ -80,8 +85,8 @@ codegen-units = 1
 debug = 1
 debug-assertions = false # <-
 incremental = false
-# lto = 'fat'
-opt-level = "s" # <-
+lto = 'fat'
+opt-level = 3 # <-
 overflow-checks = false # <-
 
 # cargo test --release
