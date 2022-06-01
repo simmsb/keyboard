@@ -87,9 +87,15 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let usb_driver = usb::Driver::new(p.USBD, irq);
 
     let mut config = embassy_usb::Config::new(0x6969, 0x0420);
-    config.manufacturer.replace("Dick");
-    config.product.replace("Sniffer");
-    config.serial_number.replace("69420");
+    config
+        .manufacturer
+        .replace(core::option_env!("USB_MANUFACTURER").unwrap_or("Rust"));
+    config
+        .product
+        .replace(core::option_env!("USB_PRODUCT").unwrap_or("Corne"));
+    config
+        .serial_number
+        .replace(core::option_env!("USB_SERIAL").unwrap_or("1"));
     config.max_power = 500;
     config.max_packet_size_0 = 64;
 
