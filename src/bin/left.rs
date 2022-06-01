@@ -297,7 +297,7 @@ async fn keyboard_poll_task(
     loop {
         let events = debouncer
             .events(matrix.get().unwrap())
-            .collect::<heapless::Vec<_, 16>>();
+            .collect::<heapless::Vec<_, 8>>();
 
         for event in &events {
             for chan in KEY_EVENT_CHANS {

@@ -23,7 +23,7 @@ embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features =
 embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 embedded-io = "0.3.0"
 heapless = { version = "0.7.13", features = ["ufmt-write", "ufmt-impl"] }
-keyberon = { git = "https://github.com/simmsb/keyberon", branch = "master" }
+keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
 postcard = "0.7.3"
 serde = { version = "1.0.137", features = ["derive"], default-features = false }

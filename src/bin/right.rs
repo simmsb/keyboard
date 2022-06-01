@@ -171,7 +171,7 @@ async fn keyboard_poll_task(
         let events = debouncer
             .events(matrix.get().unwrap())
             .map(|e| e.transform(|x, y| (x, 11 - y)))
-            .collect::<heapless::Vec<_, 16>>();
+            .collect::<heapless::Vec<_, 8>>();
 
         if !events.is_empty() {
             interacted();
