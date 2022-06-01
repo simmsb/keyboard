@@ -44,7 +44,7 @@ impl<'a, T: Instance> Oled<'a, T> {
         Ok(())
     }
 
-    pub async fn draw(&mut self, f: impl Fn(&mut OledDisplay<'a, T>)) -> Result<(), DisplayError> {
+    pub async fn draw(&mut self, f: impl FnOnce(&mut OledDisplay<'a, T>)) -> Result<(), DisplayError> {
         self.display.clear();
         f(&mut self.display);
         self.display.flush().await?;

@@ -76,8 +76,7 @@ fn csum<T: Hash>(v: T) -> u8 {
     let checksum = hasher.finish();
     let checksum = (checksum >> 32) as u32 ^ checksum as u32;
     let checksum = (checksum >> 16) as u16 ^ checksum as u16;
-    let checksum = (checksum >> 8) as u8 ^ checksum as u8;
-    checksum
+    (checksum >> 8) as u8 ^ checksum as u8
 }
 
 impl<T: Hash> Command<T> {
@@ -238,9 +237,8 @@ where
             let val = self.mix_chan.recv().await;
 
             let mut buf = [0u8; BUF_SIZE];
-            if let Some(buf) =
+            if let Ok(buf) =
                 postcard::serialize_with_flavor(&val, Cobs::try_new(Slice::new(&mut buf)).unwrap())
-                    .ok()
             {
                 let r = self.tx.write(buf).await;
                 debug!("Transmitted {:?}, r: {:?}", val, r);
@@ -273,7 +271,7 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
     async fn register_waiter(&self, uuid: u8) -> Arc<Signal<()>> {
         let signal = Arc::new(Signal::<()>::new());
         let mut waiters = self.waiters.lock().await;
-        if let Ok(_) = waiters.insert(uuid, signal.clone()) {
+        if waiters.insert(uuid, signal.clone()).is_ok() {
             signal
         } else {
             panic!("Duped waiter uuid")

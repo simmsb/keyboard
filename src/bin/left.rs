@@ -369,7 +369,7 @@ async fn handle_cmd(
                 postcard::serialize_with_flavor(&msg, Cobs::try_new(Slice::new(&mut buf)).unwrap())
                     .ok()?;
 
-            class.write_packet(&buf).await.ok()?;
+            class.write_packet(buf).await.ok()?;
         }
     }
 
@@ -393,7 +393,7 @@ async fn usb_serial_inner(class: &mut CdcAcmClass<'static, UsbDriver>) -> Option
                         )
                         .ok()?;
 
-                        class.write_packet(&buf).await.ok()?;
+                        class.write_packet(buf).await.ok()?;
                     }
                 }
                 class.write_packet(&[]).await.ok()?;

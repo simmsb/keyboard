@@ -110,6 +110,7 @@ fn components(hsv: Hsv) -> (u8, u8, u8) {
     (hsv.hue, hsv.sat, hsv.val)
 }
 
+#[derive(Default)]
 pub struct TapWaves {
     matrix: [[u8; ROWS]; COLS_PER_SIDE],
 }

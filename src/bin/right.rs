@@ -23,13 +23,15 @@ use embassy_nrf::{
 use futures::StreamExt;
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
-    self as _, init_heap,
+    self as _,
+    cpm::{cpm_task, Cpm, SampleBuffer},
+    init_heap,
     layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
-    rhs_display::{RHSDisplay, KEYPRESS_SIGNAL, TOTAL_KEYPRESSES, AVERAGE_KEYPRESSES},
-    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD, cpm::{Cpm, cpm_task},
+    rhs_display::{RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_SIGNAL, TOTAL_KEYPRESSES},
+    DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
 
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
@@ -72,10 +74,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
     static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
     let oled = OLED.put(Mutex::new(Oled::new(twim)));
-    let cpm = Cpm::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES);
+
+    static CPM_SAMPLES: Forever<Mutex<ThreadModeRawMutex, SampleBuffer>> = Forever::new();
+    let cpm_samples = CPM_SAMPLES.put(Mutex::new(SampleBuffer::default()));
+
+    let cpm = Cpm::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES, cpm_samples);
 
     spawner.spawn(cpm_task(cpm)).unwrap();
-    spawner.spawn(oled_task(oled)).unwrap();
+    spawner.spawn(oled_task(oled, cpm_samples)).unwrap();
     spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
     spawner
@@ -94,12 +100,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
 }
 
 #[embassy::task]
-async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
+async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
+                   cpm_samples: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
+) {
     Timer::after(Duration::from_millis(100)).await;
     let _ = oled.lock().await.init().await;
     debug!("oled starting up");
 
-    let mut display = RHSDisplay::new(oled);
+    let mut display = RHSDisplay::new(oled, cpm_samples);
     display.run().await;
 }
 
@@ -145,7 +153,7 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
                     KEYPRESS_SIGNAL.signal(());
                     interacted();
                 }
-            },
+            }
         }
     }
 }

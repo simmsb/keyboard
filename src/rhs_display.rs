@@ -12,8 +12,8 @@ use embassy_nrf::peripherals::TWISPI0;
 use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::BinaryColor,
-    prelude::{Point, Size},
-    primitives::Rectangle,
+    prelude::{Point, Primitive, Size},
+    primitives::{Line, PrimitiveStyle, Rectangle},
     Drawable,
 };
 use embedded_text::{style::TextBoxStyleBuilder, TextBox};
@@ -21,7 +21,7 @@ use futures::StreamExt;
 use micromath::F32Ext;
 use ufmt::uwriteln;
 
-use crate::oled::Oled;
+use crate::{cpm::SampleBuffer, oled::Oled};
 
 pub static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 pub static AVERAGE_KEYPRESSES: AtomicF32 = AtomicF32::new(0.0);
@@ -29,16 +29,23 @@ pub static KEYPRESS_SIGNAL: Signal<()> = Signal::new();
 
 pub struct RHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
-    ticker: Ticker,
+    sample_buffer: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
+    sec_ticker: Ticker,
+    upd_ticker: Ticker,
     buf: heapless::String<128>,
     ticks: u32,
 }
 
 impl RHSDisplay {
-    pub fn new(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) -> Self {
+    pub fn new(
+        oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
+        sample_buffer: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
+    ) -> Self {
         Self {
             oled,
-            ticker: Ticker::every(Duration::from_secs(1)),
+            sample_buffer,
+            sec_ticker: Ticker::every(Duration::from_secs(1)),
+            upd_ticker: Ticker::every(Duration::from_millis(32)),
             buf: Default::default(),
             ticks: 0,
         }
@@ -73,12 +80,30 @@ impl RHSDisplay {
             let text_box =
                 TextBox::with_textbox_style(&self.buf, bounds, character_style, textbox_style);
 
+            let lines = {
+                let samples = self.sample_buffer.lock().await;
+                samples
+                    .oldest_ordered()
+                    .enumerate()
+                    .map(|(idx, height)| {
+                        Line::new(
+                            Point::new(idx as i32, 128 - (*height as i32).clamp(0, 16)),
+                            Point::new(idx as i32, 128),
+                        )
+                        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+                    })
+                    .collect::<heapless::Vec<_, 32>>()
+            };
+
             let _ = self
                 .oled
                 .lock()
                 .await
-                .draw(|d| {
+                .draw(move |d| {
                     let _ = text_box.draw(d);
+                    for line in lines {
+                        let _ = line.draw(d);
+                    }
                 })
                 .await;
 
@@ -92,7 +117,13 @@ impl RHSDisplay {
     }
 
     async fn tick_update(&mut self) {
-        self.ticker.next().await;
-        self.ticks += 1;
+        let a = async {
+            self.sec_ticker.next().await;
+            self.ticks += 1;
+        };
+        let b = async {
+            self.upd_ticker.next().await;
+        };
+        select(a, b).await;
     }
 }

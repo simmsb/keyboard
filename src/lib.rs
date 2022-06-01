@@ -27,8 +27,8 @@ use embassy_nrf::uarte;
 use panic_probe as _;
 
 pub const UART_BAUD: uarte::Baudrate = uarte::Baudrate::BAUD1M;
-pub const POLL_PERIOD: Duration = Duration::from_micros(500);
-pub const DEBOUNCER_TICKS: u16 = 20;
+pub const POLL_PERIOD: Duration = Duration::from_micros(200);
+pub const DEBOUNCER_TICKS: u16 = 50;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;
