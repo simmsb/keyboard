@@ -3,12 +3,13 @@ use core::{
     hash::{Hash, Hasher},
     sync::atomic::AtomicU8,
 };
-use defmt::{debug, warn};
+use defmt::{debug, warn, Format};
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::{Channel, Sender, Signal},
+    channel::{Channel, Sender},
     mutex::Mutex,
     time::{with_timeout, Duration},
+    util::select3,
 };
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
 use postcard::{
@@ -16,6 +17,8 @@ use postcard::{
     CobsAccumulator,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use crate::event::Event;
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum DomToSub {
@@ -137,33 +140,24 @@ pub struct Eventer<'a, T, U, UT: Instance> {
     rx: UarteRx<'a, UT>,
     mix_chan: Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
     out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
-    waiters: Mutex<
-        ThreadModeRawMutex,
-        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
-    >,
+    waiters: Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
 }
 
-pub struct EventSender<'e, T> {
+struct EventSender<'e, T> {
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
-    waiters: &'e Mutex<
-        ThreadModeRawMutex,
-        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
-    >,
+    waiters: &'e Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
 }
 
-pub struct EventOutProcessor<'a, 'e, T, UT: Instance> {
+struct EventOutProcessor<'a, 'e, T, UT: Instance> {
     tx: &'e mut UarteTx<'a, UT>,
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
 }
 
-pub struct EventInProcessor<'a, 'e, T, U, UT: Instance> {
+struct EventInProcessor<'a, 'e, T, U, UT: Instance> {
     rx: &'e mut UarteRx<'a, UT>,
     out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
-    waiters: &'e Mutex<
-        ThreadModeRawMutex,
-        heapless::FnvIndexMap<u8, Arc<embassy::channel::Signal<()>>, 128>,
-    >,
+    waiters: &'e Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
 }
 
 impl<'a, 'e, T, U, UT> EventInProcessor<'a, 'e, T, U, UT>
@@ -205,7 +199,7 @@ where
                                     debug!("Received ack: {:?}", a);
                                     let mut waiters = self.waiters.lock().await;
                                     if let Some(waker) = waiters.remove(&a.uuid) {
-                                        waker.signal(());
+                                        waker.set();
                                     }
                                 } else {
                                     warn!("Corrupted parsed ack");
@@ -220,7 +214,7 @@ where
         }
     }
 
-    pub async fn task(&mut self) {
+    async fn task(&mut self) {
         loop {
             let _ = self.recv_task_inner().await;
         }
@@ -232,7 +226,7 @@ where
     T: Serialize + defmt::Format,
     UT: Instance,
 {
-    pub async fn task(&mut self) {
+    async fn task(&mut self) {
         loop {
             let val = self.mix_chan.recv().await;
 
@@ -248,11 +242,11 @@ where
 }
 
 impl<'a, T: Hash + Clone> EventSender<'a, T> {
-    pub async fn send(&self, cmd: T) {
+    async fn send(&self, cmd: T) {
         loop {
             let cmd = Command::new(cmd.clone());
             let uuid = cmd.uuid;
-            let waiter: Arc<Signal<()>> = self.register_waiter(uuid).await;
+            let waiter = self.register_waiter(uuid).await;
             self.mix_chan.send(CmdOrAck::Cmd(cmd)).await;
 
             match with_timeout(Duration::from_millis(4), waiter.wait()).await {
@@ -268,8 +262,8 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
         }
     }
 
-    async fn register_waiter(&self, uuid: u8) -> Arc<Signal<()>> {
-        let signal = Arc::new(Signal::<()>::new());
+    async fn register_waiter(&self, uuid: u8) -> Arc<Event> {
+        let signal = Arc::new(Event::new());
         let mut waiters = self.waiters.lock().await;
         if waiters.insert(uuid, signal.clone()).is_ok() {
             signal
@@ -295,30 +289,37 @@ impl<'a, T, U, UT: Instance> Eventer<'a, T, U, UT> {
         }
     }
 
-    pub fn split(
+    pub async fn run<const N: usize>(
         &mut self,
-    ) -> (
-        EventSender<T>,
-        EventOutProcessor<'a, '_, T, UT>,
-        EventInProcessor<'a, '_, T, U, UT>,
-    ) {
+        cmd_chan: &'static Channel<ThreadModeRawMutex, T, N>,
+    ) where
+        T: Hash + Clone + Serialize + Format,
+        U: Hash + DeserializeOwned + Format,
+    {
         let sender = EventSender {
             mix_chan: &self.mix_chan,
             waiters: &self.waiters,
         };
 
-        let out_processor = EventOutProcessor {
+        let mut out_processor = EventOutProcessor {
             tx: &mut self.tx,
             mix_chan: &self.mix_chan,
         };
 
-        let in_processor = EventInProcessor {
+        let mut in_processor = EventInProcessor {
             rx: &mut self.rx,
             out_chan: self.out_chan.clone(),
             mix_chan: &self.mix_chan,
             waiters: &self.waiters,
         };
 
-        (sender, out_processor, in_processor)
+        let sender_proc = async move {
+            loop {
+                let evt = cmd_chan.recv().await;
+                let _ = sender.send(evt).await;
+            }
+        };
+
+        select3(sender_proc, out_processor.task(), in_processor.task()).await;
     }
 }

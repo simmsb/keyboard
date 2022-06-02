@@ -28,9 +28,9 @@ use keyboard_thing::{
     init_heap,
     layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
-    messages::{DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, SubToDom},
+    messages::{DomToSub, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
-    rhs_display::{RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_SIGNAL, TOTAL_KEYPRESSES},
+    rhs_display::{RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES},
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
 
@@ -68,7 +68,6 @@ async fn main(spawner: Spawner, p: Peripherals) {
     static EVENTER: Forever<Eventer<SubToDom, DomToSub, UARTE0>> = Forever::new();
     static DOM_TO_SUB_CHAN: Channel<ThreadModeRawMutex, DomToSub, 16> = Channel::new();
     let eventer = EVENTER.put(Eventer::new(uart, DOM_TO_SUB_CHAN.sender()));
-    let (event_sender, event_out_proc, event_in_proc) = eventer.split();
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
@@ -90,13 +89,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner
         .spawn(read_events_task(DOM_TO_SUB_CHAN.receiver()))
         .unwrap();
-    spawner.spawn(send_events_task(event_sender)).unwrap();
-    spawner
-        .spawn(process_events_in_task(event_in_proc))
-        .unwrap();
-    spawner
-        .spawn(process_events_out_task(event_out_proc))
-        .unwrap();
+    spawner.spawn(events_task(eventer)).unwrap();
 }
 
 #[embassy::task]
@@ -120,23 +113,8 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
 }
 
 #[embassy::task]
-async fn send_events_task(events_out: EventSender<'static, SubToDom>) {
-    loop {
-        let evt = COMMAND_CHAN.recv().await;
-        let _ = events_out.send(evt).await;
-    }
-}
-
-#[embassy::task]
-async fn process_events_in_task(
-    mut proc: EventInProcessor<'static, 'static, SubToDom, DomToSub, UARTE0>,
-) {
-    proc.task().await;
-}
-
-#[embassy::task]
-async fn process_events_out_task(mut proc: EventOutProcessor<'static, 'static, SubToDom, UARTE0>) {
-    proc.task().await;
+async fn events_task(eventer: &'static mut Eventer<'static, SubToDom, DomToSub, UARTE0>) {
+    eventer.run(&COMMAND_CHAN).await;
 }
 
 #[embassy::task]
@@ -153,7 +131,7 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
             DomToSub::SyncKeypresses(kp) => {
                 if kp != 0 {
                     TOTAL_KEYPRESSES.fetch_add(kp as u32, core::sync::atomic::Ordering::Relaxed);
-                    KEYPRESS_SIGNAL.signal(());
+                    KEYPRESS_EVENT.set();
                     interacted();
                 }
             }
@@ -193,7 +171,7 @@ async fn keyboard_poll_task(
             COMMAND_CHAN.send(msg).await;
             if event.is_press() {
                 TOTAL_KEYPRESSES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-                KEYPRESS_SIGNAL.signal(());
+                KEYPRESS_EVENT.set();
             }
         }
 

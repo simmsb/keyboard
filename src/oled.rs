@@ -1,10 +1,7 @@
-use core::sync::atomic::AtomicBool;
-
 use defmt::debug;
 use display_interface::DisplayError;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Signal,
     mutex::Mutex,
     time::{Duration, Timer},
     util::select,
@@ -18,6 +15,8 @@ use ssd1306::{
     size::DisplaySize128x32,
     I2CDisplayInterface, Ssd1306,
 };
+
+use crate::event::Event;
 
 type OledDisplay<'a, T> =
     Ssd1306<I2CInterface<Twim<'a, T>>, DisplaySize128x32, BufferedGraphicsMode<DisplaySize128x32>>;
@@ -108,17 +107,24 @@ impl<'a, T: Instance> Oled<'a, T> {
 }
 
 pub const OLED_TIMEOUT: Duration = Duration::from_secs(30);
-static INTERACTED: AtomicBool = AtomicBool::new(true);
-static INTERACTED_SIG: Signal<()> = Signal::new();
+static INTERACTED_EVENT: Event = Event::new();
 
 pub fn interacted() {
-    INTERACTED.store(true, core::sync::atomic::Ordering::Relaxed);
-    INTERACTED_SIG.signal(());
+    INTERACTED_EVENT.set();
 }
 
-async fn set_noninteracted() {
+async fn turn_off(oled: &Mutex<ThreadModeRawMutex, Oled<'_, impl Instance>>) {
     Timer::after(OLED_TIMEOUT).await;
-    INTERACTED.store(false, core::sync::atomic::Ordering::SeqCst);
+
+    let _ = oled.lock().await.set_off().await;
+
+    turn_on(oled).await;
+}
+
+async fn turn_on(oled: &Mutex<ThreadModeRawMutex, Oled<'_, impl Instance>>) {
+    INTERACTED_EVENT.wait().await;
+
+    let _ = oled.lock().await.set_on().await;
 }
 
 pub async fn display_timeout_task<'a, T: Instance>(oled: &Mutex<ThreadModeRawMutex, Oled<'a, T>>)
@@ -126,17 +132,6 @@ where
     Twim<'a, T>: I2c<u8>,
 {
     loop {
-        select(set_noninteracted(), INTERACTED_SIG.wait()).await;
-        INTERACTED_SIG.reset();
-
-        let load = INTERACTED.load(core::sync::atomic::Ordering::Relaxed);
-        debug!("display timeout tick: {}", load);
-
-        if load {
-            let _ = oled.lock().await.set_on().await;
-        } else {
-            let _ = oled.lock().await.set_off().await;
-        }
-        debug!("display timeout tick over: {}", load);
+        select(turn_on(oled), turn_off(oled)).await;
     }
 }

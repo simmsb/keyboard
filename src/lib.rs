@@ -7,6 +7,7 @@
 extern crate alloc;
 
 pub mod cpm;
+pub mod event;
 pub mod layout;
 pub mod leds;
 pub mod matrix;
@@ -43,12 +44,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
 pub fn init_heap() {
-    {
-        use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 8192;
-        static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { ALLOCATOR.init(HEAP.as_ptr() as usize, HEAP_SIZE) }
-    }
+    use core::mem::MaybeUninit;
+    const HEAP_SIZE: usize = 8192;
+    static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+    unsafe { ALLOCATOR.init(HEAP.as_ptr() as usize, HEAP_SIZE) }
 }
 
 #[alloc_error_handler]

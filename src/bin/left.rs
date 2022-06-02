@@ -31,10 +31,7 @@ use keyboard_thing::{
     self as _, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
-    messages::{
-        DomToSub, EventInProcessor, EventOutProcessor, EventSender, Eventer, HostToKeyboard,
-        KeyboardToHost, SubToDom,
-    },
+    messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
 use num_enum::TryFromPrimitive;
@@ -170,7 +167,6 @@ async fn main(spawner: Spawner, p: Peripherals) {
     static EVENTER: Forever<Eventer<DomToSub, SubToDom, UARTE0>> = Forever::new();
     static SUB_TO_DOM_CHAN: Channel<ThreadModeRawMutex, SubToDom, 16> = Channel::new();
     let eventer = EVENTER.put(Eventer::new(uart, SUB_TO_DOM_CHAN.sender()));
-    let (event_sender, event_out_proc, event_in_proc) = eventer.split();
 
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(usb_serial_task(serial_class)).unwrap();
@@ -185,13 +181,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner
         .spawn(read_events_task(SUB_TO_DOM_CHAN.receiver()))
         .unwrap();
-    spawner
-        .spawn(process_events_in_task(event_in_proc))
-        .unwrap();
-    spawner
-        .spawn(process_events_out_task(event_out_proc))
-        .unwrap();
-    spawner.spawn(send_events_task(event_sender)).unwrap();
+    spawner.spawn(events_task(eventer)).unwrap();
     spawner.spawn(startup_task()).unwrap();
     spawner.spawn(sync_kp_task()).unwrap();
 }
@@ -225,23 +215,8 @@ async fn startup_task() {
 }
 
 #[embassy::task]
-async fn send_events_task(events_out: EventSender<'static, DomToSub>) {
-    loop {
-        let evt = COMMAND_CHAN.recv().await;
-        let _ = events_out.send(evt).await;
-    }
-}
-
-#[embassy::task]
-async fn process_events_in_task(
-    mut proc: EventInProcessor<'static, 'static, DomToSub, SubToDom, UARTE0>,
-) {
-    proc.task().await;
-}
-
-#[embassy::task]
-async fn process_events_out_task(mut proc: EventOutProcessor<'static, 'static, DomToSub, UARTE0>) {
-    proc.task().await;
+async fn events_task(eventer: &'static mut Eventer<'static, DomToSub, SubToDom, UARTE0>) {
+    eventer.run(&COMMAND_CHAN).await;
 }
 
 #[embassy::task]

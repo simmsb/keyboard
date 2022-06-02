@@ -3,7 +3,6 @@ use core::sync::atomic::AtomicU32;
 use atomic_float::AtomicF32;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Signal,
     mutex::Mutex,
     time::{Duration, Ticker},
     util::select,
@@ -21,11 +20,11 @@ use futures::StreamExt;
 use micromath::F32Ext;
 use ufmt::uwriteln;
 
-use crate::{cpm::SampleBuffer, oled::Oled};
+use crate::{cpm::SampleBuffer, oled::Oled, event::Event};
 
 pub static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 pub static AVERAGE_KEYPRESSES: AtomicF32 = AtomicF32::new(0.0);
-pub static KEYPRESS_SIGNAL: Signal<()> = Signal::new();
+pub static KEYPRESS_EVENT: Event = Event::new();
 
 pub struct RHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
@@ -114,8 +113,7 @@ impl RHSDisplay {
     }
 
     async fn wait_for_signal() {
-        KEYPRESS_SIGNAL.wait().await;
-        KEYPRESS_SIGNAL.reset();
+        KEYPRESS_EVENT.wait().await;
     }
 
     async fn tick_update(&mut self) {
