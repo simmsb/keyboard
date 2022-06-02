@@ -722,6 +722,7 @@ dependencies = [
  "keyberon",
  "micromath 2.0.0",
  "nrf-smartled",
+ "num-traits",
  "num_enum",
  "packed_struct",
  "panic-probe",

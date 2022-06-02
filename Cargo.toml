@@ -48,6 +48,7 @@ num_enum = { version = "0.5.7", default-features = false }
 packed_struct = { version = "0.10.0", default-features = false }
 atomic_float = { version = "0.1.0", default-features = false }
 dtoa = "1.0.2"
+num-traits = { version = "0.2.15", default-features = false }
 
 # [patch.crates-io]
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
@@ -67,7 +68,7 @@ codegen-units = 1
 debug = 2
 debug-assertions = true # <-
 incremental = false
-opt-level = 3 # <-
+opt-level = 1 # <-
 overflow-checks = true # <-
 
 # # cargo test

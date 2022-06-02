@@ -3,6 +3,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 #![feature(alloc_error_handler)]
+#![feature(mixed_integer_ops)]
 
 extern crate alloc;
 
@@ -14,6 +15,7 @@ pub mod matrix;
 pub mod messages;
 pub mod oled;
 pub mod rhs_display;
+pub mod wrapping_id;
 
 use core::alloc::Layout;
 

@@ -22,7 +22,7 @@ use crate::event::Event;
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum DomToSub {
-    ResyncLeds,
+    ResyncLeds(u16),
     Reset,
     SyncKeypresses(u16),
 }

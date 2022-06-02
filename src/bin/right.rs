@@ -1,8 +1,8 @@
 #![no_main]
 #![no_std]
-#![feature(type_alias_impl_trait)]
+#![feature(type_alias_impl_trait, mixed_integer_ops)]
 
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::AtomicU16;
 
 use defmt::debug;
 use embassy::{
@@ -31,8 +31,10 @@ use keyboard_thing::{
     messages::{DomToSub, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
     rhs_display::{RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES},
+    wrapping_id::WrappingID,
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
+use micromath::F32Ext;
 
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channels that receive each debounced key press
@@ -40,7 +42,7 @@ static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_
 /// Channel commands are put on to be sent to the other side
 static COMMAND_CHAN: Channel<ThreadModeRawMutex, SubToDom, 4> = Channel::new();
 
-static LED_COUNTER: AtomicU8 = AtomicU8::new(0);
+static LED_COUNTER_TARGET: AtomicU16 = AtomicU16::new(0);
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
@@ -122,8 +124,9 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
     loop {
         let event = events_in.recv().await;
         match event {
-            DomToSub::ResyncLeds => {
-                LED_COUNTER.store(0, core::sync::atomic::Ordering::SeqCst);
+            DomToSub::ResyncLeds(rhs) => {
+                debug!("Setting the LED counter target to {}", rhs);
+                LED_COUNTER_TARGET.store(rhs, core::sync::atomic::Ordering::Release);
             }
             DomToSub::Reset => {
                 cortex_m::peripheral::SCB::sys_reset();
@@ -184,6 +187,7 @@ async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();
     let mut ticker = Ticker::every(Duration::from_millis(1000 / fps));
+    let mut counter = WrappingID::<u16>::new(0);
 
     loop {
         while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
@@ -192,8 +196,24 @@ async fn led_task(mut leds: Leds) {
 
         tapwaves.tick();
 
-        let i = LED_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Release);
-        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
+        counter.inc();
+        let lhs =
+            WrappingID::new(LED_COUNTER_TARGET.fetch_add(1, core::sync::atomic::Ordering::Acquire));
+        let delta = lhs.delta(counter);
+        if delta != 0 {
+            let sign = delta.signum();
+            let correction = (delta as f32 * 0.5).abs().sqrt();
+            let correction = (correction as i16).max(1) * sign;
+
+            debug!(
+                "lhs: {}, counter: {}, delta: {}, correction: {}",
+                lhs, counter, delta, correction
+            );
+
+            counter.add(correction);
+        }
+
+        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, counter.get() as u8)));
 
         ticker.next().await;
     }

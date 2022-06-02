@@ -32,6 +32,7 @@ use keyboard_thing::{
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
+    wrapping_id::WrappingID,
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
 use num_enum::TryFromPrimitive;
@@ -182,7 +183,6 @@ async fn main(spawner: Spawner, p: Peripherals) {
         .spawn(read_events_task(SUB_TO_DOM_CHAN.receiver()))
         .unwrap();
     spawner.spawn(events_task(eventer)).unwrap();
-    spawner.spawn(startup_task()).unwrap();
     spawner.spawn(sync_kp_task()).unwrap();
 }
 
@@ -206,12 +206,6 @@ async fn sync_kp_task() {
 
         ticker.next().await;
     }
-}
-
-#[embassy::task]
-async fn startup_task() {
-    Timer::after(Duration::from_millis(1000)).await;
-    COMMAND_CHAN.send(DomToSub::ResyncLeds).await;
 }
 
 #[embassy::task]
@@ -306,15 +300,22 @@ async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();
     let mut ticker = Ticker::every(Duration::from_millis(1000 / fps));
+    let mut counter = WrappingID::<u16>::new(0);
 
-    for i in (0..255u8).cycle() {
+    loop {
         while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
             tapwaves.update(event);
         }
 
         tapwaves.tick();
 
-        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, i)));
+        leds.send(tapwaves.render(|x, y| rainbow_single(x, y, counter.get() as u8)));
+
+        counter.inc();
+
+        if (counter.get() % 128) == 0 {
+            let _ = COMMAND_CHAN.try_send(DomToSub::ResyncLeds(counter.get()));
+        }
 
         ticker.next().await;
     }
