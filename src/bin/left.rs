@@ -12,13 +12,13 @@ use embassy::{
     executor::Spawner,
     mutex::Mutex,
     time::{Duration, Ticker, Timer},
-    util::{select, Forever},
+    util::select3,
 };
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt, pac,
     peripherals::{self, UARTE0},
-    uarte,
+    uarte::{self, UarteRx, UarteTx},
     usb::{self, Driver},
     Peripherals,
 };
@@ -28,7 +28,9 @@ use embassy_usb_serial::CdcAcmClass;
 use futures::StreamExt;
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
-    self as _, init_heap,
+    self as _,
+    async_rw::UsbSerialWrapper,
+    forever, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
@@ -37,10 +39,6 @@ use keyboard_thing::{
 };
 use num_enum::TryFromPrimitive;
 use packed_struct::PackedStruct;
-use postcard::{
-    flavors::{Cobs, Slice},
-    CobsAccumulator,
-};
 use usbd_human_interface_device::{device::keyboard::NKROBootKeyboardReport, page::Keyboard};
 
 static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
@@ -49,8 +47,6 @@ static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::ne
 
 /// Channels that receive each debounced key press
 static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
-/// Channel log messages are put on to be sent to the computer
-static LOG_CHAN: Channel<ThreadModeRawMutex, &'static str, 16> = Channel::new();
 /// Key events that have been chorded or received from the other side
 static PROCESSED_KEY_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channel HID events are put on to be sent to the computer
@@ -105,9 +101,8 @@ async fn main(spawner: Spawner, p: Peripherals) {
         serial_state: embassy_usb_serial::State<'static>,
         usb_state: embassy_usb_hid::State<'static>,
     }
-    static RESOURCES: Forever<Resources> = Forever::new();
 
-    let res = RESOURCES.put(Resources {
+    let res: &mut Resources = forever!(Resources {
         device_descriptor: [0; 256],
         config_descriptor: [0; 256],
         bos_descriptor: [0; 256],
@@ -155,8 +150,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     );
     let chording = Chording::new(&keyboard_thing::layout::CHORDS);
 
-    static LAYOUT: Forever<Mutex<ThreadModeRawMutex, Layout>> = Forever::new();
-    let layout = LAYOUT.put(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
+    let layout = forever!(Mutex::new(Layout::new(&keyboard_thing::layout::LAYERS)));
 
     let mut uart_config = uarte::Config::default();
     uart_config.parity = uarte::Parity::EXCLUDED;
@@ -165,9 +159,14 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
 
-    static EVENTER: Forever<Eventer<DomToSub, SubToDom, UARTE0>> = Forever::new();
     static SUB_TO_DOM_CHAN: Channel<ThreadModeRawMutex, SubToDom, 16> = Channel::new();
-    let eventer = EVENTER.put(Eventer::new(uart, SUB_TO_DOM_CHAN.sender()));
+    let eventer = forever!(Eventer::<
+        '_,
+        DomToSub,
+        SubToDom,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    >::new_uart(uart, SUB_TO_DOM_CHAN.sender()));
 
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(usb_serial_task(serial_class)).unwrap();
@@ -209,7 +208,15 @@ async fn sync_kp_task() {
 }
 
 #[embassy::task]
-async fn events_task(eventer: &'static mut Eventer<'static, DomToSub, SubToDom, UARTE0>) {
+async fn events_task(
+    eventer: &'static mut Eventer<
+        'static,
+        DomToSub,
+        SubToDom,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    >,
+) {
     eventer.run(&COMMAND_CHAN).await;
 }
 
@@ -337,75 +344,44 @@ async fn hid_task(
     }
 }
 
-async fn handle_cmd(
-    class: &mut CdcAcmClass<'static, UsbDriver>,
-    cmd: HostToKeyboard,
-) -> Option<()> {
-    match cmd {
-        HostToKeyboard::RequestStats => {
-            let keypresses = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
-            let msg = KeyboardToHost::Stats { keypresses };
+#[embassy::task]
+async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
+    let in_chan: &mut Channel<ThreadModeRawMutex, u8, 64> = forever!(Channel::new());
+    let out_chan: &mut Channel<ThreadModeRawMutex, u8, 64> = forever!(Channel::new());
+    let msg_out_chan: &mut Channel<ThreadModeRawMutex, HostToKeyboard, 16> =
+        forever!(Channel::new());
+    let msg_in_chan: &mut Channel<ThreadModeRawMutex, KeyboardToHost, 16> =
+        forever!(Channel::new());
+    class.wait_connection().await;
+    let mut wrapper = UsbSerialWrapper::new(class, &*in_chan, &*out_chan);
+    let mut eventer = Eventer::new(&*in_chan, &*out_chan, msg_out_chan.sender());
 
-            let mut buf = [0u8; 64];
-            let buf =
-                postcard::serialize_with_flavor(&msg, Cobs::try_new(Slice::new(&mut buf)).unwrap())
-                    .ok()?;
-
-            class.write_packet(buf).await.ok()?;
-        }
-    }
-
-    Some(())
-}
-
-async fn usb_serial_inner(class: &mut CdcAcmClass<'static, UsbDriver>) -> Option<()> {
-    let mut recv = [0u8; 64];
-    let mut accumulator = CobsAccumulator::<128>::new();
-    loop {
-        let r = select(LOG_CHAN.recv(), class.read_packet(&mut recv)).await;
-        match r {
-            embassy::util::Either::First(log) => {
-                for chunk in log.as_bytes().chunks(60) {
-                    if let Ok(v) = heapless::Vec::<u8, 60>::from_slice(chunk) {
-                        let msg = KeyboardToHost::Log(v);
-                        let mut buf = [0u8; 64];
-                        let buf = postcard::serialize_with_flavor(
-                            &msg,
-                            Cobs::try_new(Slice::new(&mut buf)).unwrap(),
-                        )
-                        .ok()?;
-
-                        class.write_packet(buf).await.ok()?;
-                    }
+    let handle = async {
+        loop {
+            match msg_out_chan.recv().await {
+                HostToKeyboard::RequestStats => {
+                    msg_in_chan
+                        .send(KeyboardToHost::Stats {
+                            keypresses: TOTAL_KEYPRESSES
+                                .load(core::sync::atomic::Ordering::Relaxed),
+                        })
+                        .await;
                 }
-                class.write_packet(&[]).await.ok()?;
-            }
-            embassy::util::Either::Second(Ok(n)) => {
-                let mut window = &recv[..n];
-                'cobs: while !window.is_empty() {
-                    window = match accumulator.feed(window) {
-                        postcard::FeedResult::Consumed => break 'cobs,
-                        postcard::FeedResult::OverFull(buf) => buf,
-                        postcard::FeedResult::DeserError(buf) => buf,
-                        postcard::FeedResult::Success { data, remaining } => {
-                            let _ = handle_cmd(class, data).await;
-
-                            remaining
+                HostToKeyboard::WritePixels { side, row, data } => {
+                    match side {
+                        keyboard_thing::messages::KeyboardSide::Left => {
+                            // TODO: lol
+                        }
+                        keyboard_thing::messages::KeyboardSide::Right => {
+                            COMMAND_CHAN.send(DomToSub::WritePixels { row, data }).await
                         }
                     }
                 }
             }
-            embassy::util::Either::Second(_) => {}
         }
-    }
-}
+    };
 
-#[embassy::task]
-async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
-    loop {
-        class.wait_connection().await;
-        let _ = usb_serial_inner(&mut class).await;
-    }
+    select3(wrapper.run(), eventer.run(msg_in_chan), handle).await;
 }
 
 #[embassy::task]

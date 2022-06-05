@@ -16,6 +16,7 @@ pub mod messages;
 pub mod oled;
 pub mod rhs_display;
 pub mod wrapping_id;
+pub mod async_rw;
 
 use core::alloc::Layout;
 
@@ -35,6 +36,17 @@ pub const DEBOUNCER_TICKS: u16 = 50;
 
 #[cfg(all(not(feature = "debugger"), feature = "log-noop"))]
 mod defmt_noop;
+
+#[macro_export]
+macro_rules! forever {
+    ($val:expr) => {{
+        type T = impl ::core::marker::Sized;
+        static FOREVER: ::embassy::util::Forever<T> = ::embassy::util::Forever::new();
+        FOREVER.put($val)
+    }};
+}
+
+
 
 #[cfg(not(feature = "debugger"))]
 #[panic_handler]

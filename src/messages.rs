@@ -18,13 +18,20 @@ use postcard::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::event::Event;
+use crate::{
+    async_rw::{AsyncRead, AsyncWrite},
+    event::Event,
+};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum DomToSub {
     ResyncLeds(u16),
     Reset,
     SyncKeypresses(u16),
+    WritePixels {
+        row: u8,
+        data: [u8; 4],
+    }
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, defmt::Format, Hash, Clone)]
@@ -55,15 +62,25 @@ impl SubToDom {
     }
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq)]
-pub enum HostToKeyboard {
-    RequestStats,
+#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
+pub enum KeyboardSide {
+    Left,
+    Right,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
+pub enum HostToKeyboard {
+    RequestStats,
+    WritePixels {
+        side: KeyboardSide,
+        row: u8,
+        data: [u8; 4],
+    },
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
 pub enum KeyboardToHost {
     Stats { keypresses: u32 },
-    Log(heapless::Vec<u8, 60>),
 }
 
 #[derive(Serialize, Deserialize, defmt::Format)]
@@ -135,9 +152,9 @@ impl Ack {
 
 const BUF_SIZE: usize = 128;
 
-pub struct Eventer<'a, T, U, UT: Instance> {
-    tx: UarteTx<'a, UT>,
-    rx: UarteRx<'a, UT>,
+pub struct Eventer<'a, T, U, TX, RX> {
+    tx: TX,
+    rx: RX,
     mix_chan: Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
     out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
     waiters: Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
@@ -148,29 +165,29 @@ struct EventSender<'e, T> {
     waiters: &'e Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
 }
 
-struct EventOutProcessor<'a, 'e, T, UT: Instance> {
-    tx: &'e mut UarteTx<'a, UT>,
+struct EventOutProcessor<'e, T, TX> {
+    tx: &'e mut TX,
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
 }
 
-struct EventInProcessor<'a, 'e, T, U, UT: Instance> {
-    rx: &'e mut UarteRx<'a, UT>,
+struct EventInProcessor<'a, 'e, T, U, RX> {
+    rx: &'e mut RX,
     out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
     mix_chan: &'e Channel<ThreadModeRawMutex, CmdOrAck<T>, 16>,
     waiters: &'e Mutex<ThreadModeRawMutex, heapless::FnvIndexMap<u8, Arc<Event>, 128>>,
 }
 
-impl<'a, 'e, T, U, UT> EventInProcessor<'a, 'e, T, U, UT>
+impl<'a, 'e, T, U, RX> EventInProcessor<'a, 'e, T, U, RX>
 where
     U: DeserializeOwned + Hash + defmt::Format,
-    UT: Instance,
+    RX: AsyncRead,
 {
     async fn recv_task_inner(&mut self) -> Option<()> {
         let mut accumulator = CobsAccumulator::<BUF_SIZE>::new();
 
         loop {
             let mut buf = [0u8; 1];
-            self.rx.read(&mut buf).await.ok()?;
+            self.rx.read(&mut buf[0]).await.ok()?;
             let mut window = &buf[..];
 
             'cobs: while !window.is_empty() {
@@ -221,10 +238,10 @@ where
     }
 }
 
-impl<'a, 'e, T, UT> EventOutProcessor<'a, 'e, T, UT>
+impl<'e, T, TX> EventOutProcessor<'e, T, TX>
 where
     T: Serialize + defmt::Format,
-    UT: Instance,
+    TX: AsyncWrite,
 {
     async fn task(&mut self) {
         loop {
@@ -277,9 +294,8 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
     }
 }
 
-impl<'a, T, U, UT: Instance> Eventer<'a, T, U, UT> {
-    pub fn new(uart: Uarte<'a, UT>, out_chan: Sender<'a, ThreadModeRawMutex, U, 16>) -> Self {
-        let (tx, rx) = uart.split();
+impl<'a, T, U, TX, RX> Eventer<'a, T, U, TX, RX> {
+    pub fn new(tx: TX, rx: RX, out_chan: Sender<'a, ThreadModeRawMutex, U, 16>) -> Self {
         Self {
             tx,
             rx,
@@ -289,12 +305,23 @@ impl<'a, T, U, UT: Instance> Eventer<'a, T, U, UT> {
         }
     }
 
+    pub fn new_uart<UT: Instance>(
+        uart: Uarte<'static, UT>,
+        out_chan: Sender<'a, ThreadModeRawMutex, U, 16>,
+    ) -> Eventer<'a, T, U, UarteTx<'static, UT>, UarteRx<'static, UT>> {
+        let (tx, rx) = uart.split();
+
+        Eventer::new(tx, rx, out_chan)
+    }
+
     pub async fn run<const N: usize>(
         &mut self,
         cmd_chan: &'static Channel<ThreadModeRawMutex, T, N>,
     ) where
         T: Hash + Clone + Serialize + Format,
         U: Hash + DeserializeOwned + Format,
+        TX: AsyncWrite,
+        RX: AsyncRead,
     {
         let sender = EventSender {
             mix_chan: &self.mix_chan,

@@ -11,26 +11,28 @@ use embassy::{
     executor::Spawner,
     mutex::Mutex,
     time::{Duration, Ticker, Timer},
-    util::Forever,
 };
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt,
     peripherals::{TWISPI0, UARTE0},
     twim::{self, Twim},
-    uarte, Peripherals,
+    uarte::{self, UarteRx, UarteTx},
+    Peripherals,
 };
 use futures::StreamExt;
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
     self as _,
     cpm::{cpm_task, Cpm, SampleBuffer},
-    init_heap,
+    forever, init_heap,
     layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
     messages::{DomToSub, Eventer, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
-    rhs_display::{RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES},
+    rhs_display::{
+        self, DisplayOverride, RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES,
+    },
     wrapping_id::WrappingID,
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
@@ -67,17 +69,20 @@ async fn main(spawner: Spawner, p: Peripherals) {
 
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P0_08, p.P1_04, uart_config);
-    static EVENTER: Forever<Eventer<SubToDom, DomToSub, UARTE0>> = Forever::new();
     static DOM_TO_SUB_CHAN: Channel<ThreadModeRawMutex, DomToSub, 16> = Channel::new();
-    let eventer = EVENTER.put(Eventer::new(uart, DOM_TO_SUB_CHAN.sender()));
+    let eventer = forever!(Eventer::<
+        '_,
+        SubToDom,
+        DomToSub,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    >::new_uart(uart, DOM_TO_SUB_CHAN.sender()));
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
-    static OLED: Forever<Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>> = Forever::new();
-    let oled = OLED.put(Mutex::new(Oled::new(twim)));
+    let oled = forever!(Mutex::new(Oled::new(twim)));
 
-    static CPM_SAMPLES: Forever<Mutex<ThreadModeRawMutex, SampleBuffer>> = Forever::new();
-    let cpm_samples = CPM_SAMPLES.put(Mutex::new(SampleBuffer::default()));
+    let cpm_samples = forever!(Mutex::new(SampleBuffer::default()));
 
     let cpm = Cpm::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES, cpm_samples);
 
@@ -115,7 +120,15 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
 }
 
 #[embassy::task]
-async fn events_task(eventer: &'static mut Eventer<'static, SubToDom, DomToSub, UARTE0>) {
+async fn events_task(
+    eventer: &'static mut Eventer<
+        'static,
+        SubToDom,
+        DomToSub,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    >,
+) {
     eventer.run(&COMMAND_CHAN).await;
 }
 
@@ -137,6 +150,11 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
                     KEYPRESS_EVENT.set();
                     interacted();
                 }
+            }
+            DomToSub::WritePixels { row, data } => {
+                rhs_display::OVERRIDE_CHAN
+                    .send(DisplayOverride { row, data })
+                    .await;
             }
         }
     }
