@@ -1,8 +1,8 @@
 use core::ops::Neg;
 
 use num_traits::{
-    Bounded, CheckedNeg, FromPrimitive, Num, NumCast, SaturatingAdd, SaturatingSub, Signed,
-    ToPrimitive, Unsigned, WrappingAdd, WrappingSub, Zero,
+    Bounded, CheckedNeg, FromPrimitive, NumCast, SaturatingAdd, SaturatingSub, Signed, ToPrimitive,
+    Unsigned, WrappingAdd, WrappingSub, Zero,
 };
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ where
             NumCast::from(d).unwrap()
         } else {
             let x: T::Signed =
-                NumCast::from(T::max_value() - (d - T::one())).unwrap_or(T::Signed::zero());
+                NumCast::from(T::max_value() - (d - T::one())).unwrap_or_else(T::Signed::zero);
             -x
         }
     }
