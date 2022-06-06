@@ -294,7 +294,7 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 [[package]]
 name = "embassy"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "atomic-polyfill",
  "cfg-if",
@@ -313,7 +313,7 @@ dependencies = [
 [[package]]
 name = "embassy-hal-common"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "cortex-m",
  "embassy",
@@ -323,7 +323,7 @@ dependencies = [
 [[package]]
 name = "embassy-macros"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -334,7 +334,7 @@ dependencies = [
 [[package]]
 name = "embassy-nrf"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -361,7 +361,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "defmt",
  "embassy",
@@ -371,7 +371,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-hid"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "defmt",
  "embassy",
@@ -384,7 +384,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-serial"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#0adb4c926b15f9773fb83497a7bf1eb3789286da"
+source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
 dependencies = [
  "defmt",
  "embassy",
@@ -691,7 +691,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "keyberon"
 version = "0.2.0"
-source = "git+https://github.com/TeXitoi/keyberon?branch=master#f57ce10fac1d1b20fa6990978ac9c4f434f02894"
+source = "git+https://github.com/TeXitoi/keyberon?branch=master#c0d35b53f875e8539348be0d1a713a3b670d5747"
 dependencies = [
  "arraydeque",
  "either",
@@ -704,7 +704,7 @@ dependencies = [
 [[package]]
 name = "keyberon-macros"
 version = "0.1.0"
-source = "git+https://github.com/TeXitoi/keyberon?branch=master#f57ce10fac1d1b20fa6990978ac9c4f434f02894"
+source = "git+https://github.com/TeXitoi/keyberon?branch=master#c0d35b53f875e8539348be0d1a713a3b670d5747"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -739,6 +739,7 @@ dependencies = [
  "futures",
  "heapless",
  "keyberon",
+ "keyboard_shared",
  "micromath 2.0.0",
  "nrf-smartled",
  "num-traits",
@@ -752,6 +753,14 @@ dependencies = [
  "ufmt",
  "usbd-hid 0.6.0",
  "usbd-human-interface-device",
+]
+
+[[package]]
+name = "keyboard_shared"
+version = "0.1.0"
+dependencies = [
+ "defmt",
+ "serde",
 ]
 
 [[package]]
@@ -1249,9 +1258,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbaf6116ab8924f39d52792136fb74fd60a80194cf1b1c6ffa6453eef1c3f942"
+checksum = "0748dd251e24453cb8717f0354206b91557e4ec8703673a4b30208f2abaf1ebf"
 dependencies = [
  "proc-macro2",
  "quote",

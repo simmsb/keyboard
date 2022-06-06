@@ -18,6 +18,8 @@ use postcard::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub use keyboard_shared::*;
+
 use crate::{
     async_rw::{AsyncRead, AsyncWrite},
     event::Event,
@@ -60,27 +62,6 @@ impl SubToDom {
     pub fn key_released(x: u8, y: u8) -> Self {
         Self::KeyReleased(((x & 0xf) << 4) | (y & 0xf))
     }
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
-pub enum KeyboardSide {
-    Left,
-    Right,
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
-pub enum HostToKeyboard {
-    RequestStats,
-    WritePixels {
-        side: KeyboardSide,
-        row: u8,
-        data: [u8; 4],
-    },
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
-pub enum KeyboardToHost {
-    Stats { keypresses: u32 },
 }
 
 #[derive(Serialize, Deserialize, defmt::Format)]

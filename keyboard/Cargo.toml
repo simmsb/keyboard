@@ -1,8 +1,11 @@
+cargo-features = ["per-package-target"]
+
 [package]
 authors = ["Ben Simms <ben@bensimms.moe>"]
 name = "keyboard-thing"
 edition = "2021"
 version = "0.1.0"
+forced-target = "thumbv7em-none-eabihf"
 
 [lib]
 harness = false
@@ -36,6 +39,7 @@ fnv = { version = "1.0.7", default-features = false }
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.13", features = ["ufmt-write", "ufmt-impl"] }
 keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
+keyboard_shared = { version = "0.1.0", path = "../keyboard_shared" }
 micromath = "2.0.0"
 nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
 num-traits = { version = "0.2.15", default-features = false }
@@ -61,40 +65,3 @@ default = ["debugger", "nightly"]
 debugger = ["panic-probe", "defmt-rtt"]
 log-noop = []
 
-# cargo build/run
-[profile.dev]
-codegen-units = 1
-debug = 2
-debug-assertions = true # <-
-incremental = false
-opt-level = 1 # <-
-overflow-checks = true # <-
-# # cargo test
-# [profile.test]
-# codegen-units = 1
-# debug = 2
-# debug-assertions = true # <-
-# incremental = false
-# opt-level = 3 # <-
-# overflow-checks = true # <-
-
-# cargo build/run --release
-[profile.release]
-codegen-units = 1
-debug = 1
-debug-assertions = false # <-
-incremental = false
-lto = 'fat'
-opt-level = 3 # <-
-overflow-checks = false # <-
-
-# cargo test --release
-[profile.bench]
-codegen-units = 1
-debug = 2
-debug-assertions = false # <-
-incremental = false
-# see comment in the profile.release section
-lto = 'false'
-opt-level = 3 # <-
-overflow-checks = false # <-
