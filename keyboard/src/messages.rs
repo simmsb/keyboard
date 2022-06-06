@@ -1,8 +1,5 @@
 use alloc::sync::Arc;
-use core::{
-    hash::{Hash, Hasher},
-    sync::atomic::AtomicU8,
-};
+use core::hash::Hash;
 use defmt::{debug, warn, Format};
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
@@ -25,18 +22,15 @@ use crate::{
     event::Event,
 };
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, defmt::Format, Hash, Clone)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Format, Hash, Clone)]
 pub enum DomToSub {
     ResyncLeds(u16),
     Reset,
     SyncKeypresses(u16),
-    WritePixels {
-        row: u8,
-        data: [u8; 4],
-    }
+    WritePixels { row: u8, data: [u8; 4] },
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, defmt::Format, Hash, Clone)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Format, Hash, Clone)]
 pub enum SubToDom {
     KeyPressed(u8),
     KeyReleased(u8),
@@ -61,73 +55,6 @@ impl SubToDom {
 
     pub fn key_released(x: u8, y: u8) -> Self {
         Self::KeyReleased(((x & 0xf) << 4) | (y & 0xf))
-    }
-}
-
-#[derive(Serialize, Deserialize, defmt::Format)]
-struct Command<T> {
-    uuid: u8,
-    csum: u8,
-    cmd: T,
-}
-
-fn csum<T: Hash>(v: T) -> u8 {
-    let mut hasher = fnv::FnvHasher::default();
-    v.hash(&mut hasher);
-    let checksum = hasher.finish();
-    let checksum = (checksum >> 32) as u32 ^ checksum as u32;
-    let checksum = (checksum >> 16) as u16 ^ checksum as u16;
-    (checksum >> 8) as u8 ^ checksum as u8
-}
-
-impl<T: Hash> Command<T> {
-    fn new(cmd: T) -> Self {
-        static UUID_GEN: AtomicU8 = AtomicU8::new(0);
-        let uuid = UUID_GEN.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-        let csum = csum((&cmd, uuid));
-        Self { uuid, csum, cmd }
-    }
-
-    /// validate the data of the command
-    /// though the data will probably fail to deserialize if it has been corrupted, this just makes sure
-    fn validate(self) -> Option<Self> {
-        let csum = csum((&self.cmd, self.uuid));
-        if csum == self.csum {
-            Some(self)
-        } else {
-            None
-        }
-    }
-
-    fn ack(&self) -> Ack {
-        let csum = csum(self.uuid);
-        Ack {
-            uuid: self.uuid,
-            csum,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, defmt::Format)]
-pub struct Ack {
-    uuid: u8,
-    csum: u8,
-}
-
-#[derive(Serialize, Deserialize, defmt::Format)]
-enum CmdOrAck<T> {
-    Cmd(Command<T>),
-    Ack(Ack),
-}
-
-impl Ack {
-    fn validate(self) -> Option<Self> {
-        let csum = csum(self.uuid);
-        if csum == self.csum {
-            Some(self)
-        } else {
-            None
-        }
     }
 }
 
@@ -160,7 +87,7 @@ struct EventInProcessor<'a, 'e, T, U, RX> {
 
 impl<'a, 'e, T, U, RX> EventInProcessor<'a, 'e, T, U, RX>
 where
-    U: DeserializeOwned + Hash + defmt::Format,
+    U: DeserializeOwned + Hash + Format,
     RX: AsyncRead,
 {
     async fn recv_task_inner(&mut self) -> Option<()> {
@@ -176,7 +103,11 @@ where
                     postcard::FeedResult::Consumed => break 'cobs,
                     postcard::FeedResult::OverFull(buf) => buf,
                     postcard::FeedResult::DeserError(buf) => {
-                        warn!("Message decoder failed to deserialize a message");
+                        warn!(
+                            "Message decoder failed to deserialize a message of type {}: {:?}",
+                            core::any::type_name::<CmdOrAck<U>>(),
+                            buf
+                        );
                         buf
                     }
                     postcard::FeedResult::Success { data, remaining } => {
@@ -184,12 +115,12 @@ where
 
                         match data {
                             CmdOrAck::Cmd(c) => {
-                                if let Some(c) = c.validate() {
+                                if c.validate() {
                                     debug!("Received command: {:?}", c);
                                     self.mix_chan.send(CmdOrAck::Ack(c.ack())).await;
                                     self.out_chan.send(c.cmd).await;
                                 } else {
-                                    warn!("Corrupted parsed command");
+                                    warn!("Corrupted parsed command: {:?}", c);
                                 }
                             }
                             CmdOrAck::Ack(a) => {
@@ -221,8 +152,9 @@ where
 
 impl<'e, T, TX> EventOutProcessor<'e, T, TX>
 where
-    T: Serialize + defmt::Format,
+    T: Serialize + Format,
     TX: AsyncWrite,
+    <TX as AsyncWrite>::Error: Format,
 {
     async fn task(&mut self) {
         loop {
@@ -247,7 +179,7 @@ impl<'a, T: Hash + Clone> EventSender<'a, T> {
             let waiter = self.register_waiter(uuid).await;
             self.mix_chan.send(CmdOrAck::Cmd(cmd)).await;
 
-            match with_timeout(Duration::from_millis(4), waiter.wait()).await {
+            match with_timeout(Duration::from_millis(5), waiter.wait()).await {
                 Ok(_) => {
                     debug!("Waiter for uuid {} completed", uuid);
                     return;
@@ -303,6 +235,7 @@ impl<'a, T, U, TX, RX> Eventer<'a, T, U, TX, RX> {
         U: Hash + DeserializeOwned + Format,
         TX: AsyncWrite,
         RX: AsyncRead,
+        <TX as AsyncWrite>::Error: Format,
     {
         let sender = EventSender {
             mix_chan: &self.mix_chan,

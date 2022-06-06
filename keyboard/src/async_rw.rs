@@ -101,7 +101,7 @@ impl<'d, D: Driver<'d>, const N: usize> UsbSerialWrapper<'d, D, N> {
     pub async fn run(&mut self) {
         loop {
             let a = async {
-                let mut v = heapless::Vec::<u8, N>::new();
+                let mut v = heapless::Vec::<u8, 64>::new();
 
                 v.push(self.in_chan.recv().await).unwrap();
 

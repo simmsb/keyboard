@@ -7,16 +7,17 @@
 
 extern crate alloc;
 
+pub mod async_rw;
 pub mod cpm;
 pub mod event;
 pub mod layout;
 pub mod leds;
+pub mod lhs_display;
 pub mod matrix;
 pub mod messages;
 pub mod oled;
 pub mod rhs_display;
 pub mod wrapping_id;
-pub mod async_rw;
 
 use core::alloc::Layout;
 
@@ -45,8 +46,6 @@ macro_rules! forever {
         FOREVER.put($val)
     }};
 }
-
-
 
 #[cfg(not(feature = "debugger"))]
 #[panic_handler]

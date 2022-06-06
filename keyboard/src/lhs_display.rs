@@ -1,6 +1,3 @@
-use core::sync::atomic::AtomicU32;
-
-use atomic_float::AtomicF32;
 use bitvec::{order::Lsb0, view::BitView};
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
@@ -10,19 +7,10 @@ use embassy::{
     util::{select, select3},
 };
 use embassy_nrf::peripherals::TWISPI0;
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
-    pixelcolor::BinaryColor,
-    prelude::{Point, Primitive, Size},
-    primitives::{Line, PrimitiveStyle, Rectangle},
-    Drawable, Pixel,
-};
-use embedded_text::{style::TextBoxStyleBuilder, TextBox};
+use embedded_graphics::{pixelcolor::BinaryColor, prelude::Point, Drawable, Pixel};
 use futures::StreamExt;
-use micromath::F32Ext;
-use ufmt::uwriteln;
 
-use crate::{cpm::SampleBuffer, event::Event, oled::Oled};
+use crate::{event::Event, oled::Oled};
 
 #[derive(defmt::Format)]
 pub struct DisplayOverride {
@@ -30,28 +18,21 @@ pub struct DisplayOverride {
     pub data: [u8; 4],
 }
 
-pub static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
-pub static AVERAGE_KEYPRESSES: AtomicF32 = AtomicF32::new(0.0);
 pub static KEYPRESS_EVENT: Event = Event::new();
 pub static OVERRIDE_CHAN: Channel<ThreadModeRawMutex, DisplayOverride, 256> = Channel::new();
 
-pub struct RHSDisplay {
+pub struct LHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
-    sample_buffer: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
     sec_ticker: Ticker,
     upd_ticker: Ticker,
     buf: heapless::String<128>,
     ticks: u32,
 }
 
-impl RHSDisplay {
-    pub fn new(
-        oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
-        sample_buffer: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
-    ) -> Self {
+impl LHSDisplay {
+    pub fn new(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) -> Self {
         Self {
             oled,
-            sample_buffer,
             sec_ticker: Ticker::every(Duration::from_secs(1)),
             upd_ticker: Ticker::every(Duration::from_millis(100)),
             buf: Default::default(),
@@ -133,60 +114,8 @@ impl RHSDisplay {
     }
 
     async fn render_normal(&mut self) {
-        let character_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-        let textbox_style = TextBoxStyleBuilder::new()
-            .height_mode(embedded_text::style::HeightMode::FitToText)
-            .alignment(embedded_text::alignment::HorizontalAlignment::Justified)
-            .paragraph_spacing(6)
-            .build();
-
-        let bounds = Rectangle::new(Point::zero(), Size::new(32, 0));
-
-        self.buf.clear();
-
-        let kp = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
-        let cps = AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
-        let cps = f32::trunc(cps * 10.0) / 10.0;
-        let mut fp_buf = dtoa::Buffer::new();
-        let cps = fp_buf.format_finite(cps);
-
-        let _ = uwriteln!(&mut self.buf, "kp:");
-        let _ = uwriteln!(&mut self.buf, "{}", kp);
-        let _ = uwriteln!(&mut self.buf, "cps:");
-        let _ = uwriteln!(&mut self.buf, "{}/s", cps);
-        let _ = uwriteln!(&mut self.buf, "tick:");
-        let _ = uwriteln!(&mut self.buf, "{}", self.ticks);
-
-        let text_box =
-            TextBox::with_textbox_style(&self.buf, bounds, character_style, textbox_style);
-
-        let lines = {
-            let samples = self.sample_buffer.lock().await;
-            samples
-                .oldest_ordered()
-                .enumerate()
-                .map(|(idx, height)| {
-                    Line::new(
-                        Point::new(idx as i32, 128 - (*height as i32).clamp(0, 16)),
-                        Point::new(idx as i32, 128),
-                    )
-                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-                })
-                .collect::<heapless::Vec<_, 32>>()
-        };
-
         {
-            let _ = self
-                .oled
-                .lock()
-                .await
-                .draw(move |d| {
-                    let _ = text_box.draw(d);
-                    for line in lines {
-                        let _ = line.draw(d);
-                    }
-                })
-                .await;
+            let _ = self.oled.lock().await.draw(move |d| {}).await;
         }
     }
 }

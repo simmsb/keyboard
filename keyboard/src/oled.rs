@@ -54,6 +54,21 @@ impl<'a, T: Instance> Oled<'a, T> {
         Ok(())
     }
 
+    pub fn clear(&mut self) {
+        self.display.clear();
+    }
+
+    pub async fn flush(&mut self) -> Result<(), DisplayError> {
+        self.display.flush().await
+    }
+
+    pub fn draw_no_clear_no_flush(
+        &mut self,
+        f: impl FnOnce(&mut OledDisplay<'a, T>),
+    ) {
+        f(&mut self.display);
+    }
+
     pub async fn set_on(&mut self) -> Result<(), DisplayError> {
         if self.status {
             return Ok(());

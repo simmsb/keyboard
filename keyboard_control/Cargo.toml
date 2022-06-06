@@ -6,9 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bitvec = "1.0.0"
 clap = { version = "3.1.18", features = ["derive"] }
 color-eyre = "0.6.1"
 image = "0.24.2"
 keyboard_shared = { version = "0.1.0", path = "../keyboard_shared" }
-tokio = { version = "1.19.1", features = ["rt", "macros"] }
+postcard = { version = "0.7.3", features = ["alloc"] }
+tokio = { version = "1.19.1", features = ["rt", "macros", "io-util", "time"] }
 tokio-serial = "5.4.3"
+tracing = { version = "0.1.34", features = ["async-await"] }
+tracing-error = "0.2.0"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }

@@ -17,7 +17,8 @@ use embassy::{
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt, pac,
-    peripherals::{self, UARTE0},
+    peripherals::{self, TWISPI0, UARTE0},
+    twim::{self, Twim},
     uarte::{self, UarteRx, UarteTx},
     usb::{self, Driver},
     Peripherals,
@@ -33,7 +34,9 @@ use keyboard_thing::{
     forever, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
+    lhs_display::{self, DisplayOverride, LHSDisplay},
     messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
+    oled::{display_timeout_task, interacted, Oled},
     wrapping_id::WrappingID,
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
 };
@@ -168,10 +171,18 @@ async fn main(spawner: Spawner, p: Peripherals) {
         UarteRx<'static, UARTE0>,
     >::new_uart(uart, SUB_TO_DOM_CHAN.sender()));
 
+    let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
+    let mut config = twim::Config::default();
+    config.frequency = twim::Frequency::K400;
+    let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
+    let oled = forever!(Mutex::new(Oled::new(twim)));
+
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(usb_serial_task(serial_class)).unwrap();
     spawner.spawn(hid_task(hid)).unwrap();
 
+    spawner.spawn(oled_task(oled)).unwrap();
+    spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
     spawner
         .spawn(keyboard_poll_task(matrix, debouncer, chording))
@@ -183,6 +194,23 @@ async fn main(spawner: Spawner, p: Peripherals) {
         .unwrap();
     spawner.spawn(events_task(eventer)).unwrap();
     spawner.spawn(sync_kp_task()).unwrap();
+}
+
+#[embassy::task]
+async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
+    Timer::after(Duration::from_millis(100)).await;
+    {
+        let _ = oled.lock().await.init().await;
+    }
+    debug!("oled starting up");
+
+    let mut display = LHSDisplay::new(oled);
+    display.run().await;
+}
+
+#[embassy::task]
+async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
+    display_timeout_task(oled).await;
 }
 
 #[embassy::task]
@@ -346,8 +374,8 @@ async fn hid_task(
 
 #[embassy::task]
 async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
-    let in_chan: &mut Channel<ThreadModeRawMutex, u8, 64> = forever!(Channel::new());
-    let out_chan: &mut Channel<ThreadModeRawMutex, u8, 64> = forever!(Channel::new());
+    let in_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
+    let out_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
     let msg_out_chan: &mut Channel<ThreadModeRawMutex, HostToKeyboard, 16> =
         forever!(Channel::new());
     let msg_in_chan: &mut Channel<ThreadModeRawMutex, KeyboardToHost, 16> =
@@ -367,16 +395,17 @@ async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
                         })
                         .await;
                 }
-                HostToKeyboard::WritePixels { side, row, data } => {
-                    match side {
-                        keyboard_thing::messages::KeyboardSide::Left => {
-                            // TODO: lol
-                        }
-                        keyboard_thing::messages::KeyboardSide::Right => {
-                            COMMAND_CHAN.send(DomToSub::WritePixels { row, data }).await
-                        }
+                HostToKeyboard::WritePixels { side, row, data } => match side {
+                    keyboard_thing::messages::KeyboardSide::Left => {
+                        lhs_display::OVERRIDE_CHAN
+                            .send(DisplayOverride { row, data })
+                            .await;
+                        interacted();
                     }
-                }
+                    keyboard_thing::messages::KeyboardSide::Right => {
+                        COMMAND_CHAN.send(DomToSub::WritePixels { row, data }).await
+                    }
+                },
             }
         }
     };

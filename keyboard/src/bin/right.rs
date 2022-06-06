@@ -79,7 +79,9 @@ async fn main(spawner: Spawner, p: Peripherals) {
     >::new_uart(uart, DOM_TO_SUB_CHAN.sender()));
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
-    let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, twim::Config::default());
+    let mut config = twim::Config::default();
+    config.frequency = twim::Frequency::K400;
+    let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
     let oled = forever!(Mutex::new(Oled::new(twim)));
 
     let cpm_samples = forever!(Mutex::new(SampleBuffer::default()));
@@ -155,6 +157,7 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
                 rhs_display::OVERRIDE_CHAN
                     .send(DisplayOverride { row, data })
                     .await;
+                interacted();
             }
         }
     }

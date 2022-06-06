@@ -70,12 +70,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fe8f5a8a398345e52358e18ff07cc17a568fbca5c6f73873d3a62056309603"
 
 [[package]]
-name = "bbqueue"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3baa8859d1a4c7411039a75c0599a4640ef1c9a8fc811e4325b00e6cfe0a55"
-
-[[package]]
 name = "bit_field"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -717,7 +711,6 @@ version = "0.1.0"
 dependencies = [
  "alloc-cortex-m",
  "atomic_float",
- "bbqueue",
  "bitvec 1.0.0",
  "cortex-m",
  "cortex-m-rt",
@@ -735,7 +728,6 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io",
  "embedded-text",
- "fnv",
  "futures",
  "heapless",
  "keyberon",
@@ -760,6 +752,7 @@ name = "keyboard_shared"
 version = "0.1.0"
 dependencies = [
  "defmt",
+ "fnv",
  "serde",
 ]
 
