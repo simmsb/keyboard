@@ -1,3 +1,4 @@
+use defmt::debug;
 use embassy::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_nrf::uarte::{self, UarteRx, UarteTx};
 use embassy_usb::driver::Driver;
@@ -111,6 +112,8 @@ impl<'d, D: Driver<'d>, const N: usize> UsbSerialWrapper<'d, D, N> {
                         break;
                     }
                 }
+
+                debug!("Sent a serial packet of length {}", v.len());
 
                 v
             };
