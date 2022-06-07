@@ -2,6 +2,8 @@
 
 ![image](https://user-images.githubusercontent.com/5330444/171196800-3247e66a-f399-47ae-921f-89090905b679.png)
 
+https://user-images.githubusercontent.com/5330444/172443165-bc76f323-c769-49e6-9992-025ef0be5f02.mp4
+
 ## Required mods
 
 The corne v3 uses only one of the TR(R)S pins, but this firmware needs both data
