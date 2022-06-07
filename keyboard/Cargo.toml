@@ -1,11 +1,8 @@
-cargo-features = ["per-package-target"]
-
 [package]
 authors = ["Ben Simms <ben@bensimms.moe>"]
 name = "keyboard-thing"
 edition = "2021"
 version = "0.1.0"
-forced-target = "thumbv7em-none-eabihf"
 
 [lib]
 harness = false
