@@ -26,7 +26,7 @@ use embassy_nrf::{
 use embassy_usb::UsbDevice;
 use embassy_usb_hid::HidWriter;
 use embassy_usb_serial::CdcAcmClass;
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
     self as _,
@@ -55,7 +55,7 @@ static PROCESSED_KEY_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new
 /// Channel HID events are put on to be sent to the computer
 static HID_CHAN: Channel<ThreadModeRawMutex, NKROBootKeyboardReport, 1> = Channel::new();
 /// Channel commands are put on to be sent to the other side
-static COMMAND_CHAN: Channel<ThreadModeRawMutex, DomToSub, 4> = Channel::new();
+static COMMAND_CHAN: Channel<ThreadModeRawMutex, (DomToSub, Duration), 4> = Channel::new();
 
 trait StaticLen {
     const LEN: usize;
@@ -163,17 +163,27 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P1_04, p.P0_08, uart_config);
 
     static SUB_TO_DOM_CHAN: Channel<ThreadModeRawMutex, SubToDom, 16> = Channel::new();
-    let eventer = forever!(Eventer::<
+    // pain
+    let eventer: &mut Eventer<
+        '_,
+        DomToSub,
+        SubToDom,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    > = forever!(Eventer::<
         '_,
         DomToSub,
         SubToDom,
         UarteTx<'static, UARTE0>,
         UarteRx<'static, UARTE0>,
     >::new_uart(uart, SUB_TO_DOM_CHAN.sender()));
+    let (e_a, e_b, e_c) = eventer.split_tasks(&COMMAND_CHAN);
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     let mut config = twim::Config::default();
-    config.frequency = twim::Frequency::K400;
+    config.frequency = unsafe { core::mem::transmute(159715200) };
+    config.scl_high_drive = true;
+    config.sda_high_drive = true;
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
     let oled = forever!(Mutex::new(Oled::new(twim)));
 
@@ -192,7 +202,9 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner
         .spawn(read_events_task(SUB_TO_DOM_CHAN.receiver()))
         .unwrap();
-    spawner.spawn(events_task(eventer)).unwrap();
+    spawner.spawn(eventer_a(e_a)).unwrap();
+    spawner.spawn(eventer_b(e_b)).unwrap();
+    spawner.spawn(eventer_c(e_c)).unwrap();
     spawner.spawn(sync_kp_task()).unwrap();
 }
 
@@ -225,7 +237,10 @@ async fn sync_kp_task() {
 
         if diff != 0 {
             COMMAND_CHAN
-                .send(DomToSub::SyncKeypresses(diff as u16))
+                .send((
+                    DomToSub::SyncKeypresses(diff as u16),
+                    Duration::from_millis(5),
+                ))
                 .await;
         }
 
@@ -235,17 +250,25 @@ async fn sync_kp_task() {
     }
 }
 
+type EventerA = impl Future + 'static;
+
 #[embassy::task]
-async fn events_task(
-    eventer: &'static mut Eventer<
-        'static,
-        DomToSub,
-        SubToDom,
-        UarteTx<'static, UARTE0>,
-        UarteRx<'static, UARTE0>,
-    >,
-) {
-    eventer.run(&COMMAND_CHAN).await;
+async fn eventer_a(f: EventerA) {
+    f.await;
+}
+
+type EventerB = impl Future + 'static;
+
+#[embassy::task]
+async fn eventer_b(f: EventerB) {
+    f.await;
+}
+
+type EventerC = impl Future + 'static;
+
+#[embassy::task]
+async fn eventer_c(f: EventerC) {
+    f.await;
 }
 
 #[embassy::task]
@@ -349,7 +372,10 @@ async fn led_task(mut leds: Leds) {
         counter.inc();
 
         if (counter.get() % 128) == 0 {
-            let _ = COMMAND_CHAN.try_send(DomToSub::ResyncLeds(counter.get()));
+            let _ = COMMAND_CHAN.try_send((
+                DomToSub::ResyncLeds(counter.get()),
+                Duration::from_millis(5),
+            ));
         }
 
         ticker.next().await;
@@ -378,7 +404,7 @@ async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
     let out_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
     let msg_out_chan: &mut Channel<ThreadModeRawMutex, HostToKeyboard, 16> =
         forever!(Channel::new());
-    let msg_in_chan: &mut Channel<ThreadModeRawMutex, KeyboardToHost, 16> =
+    let msg_in_chan: &mut Channel<ThreadModeRawMutex, (KeyboardToHost, Duration), 16> =
         forever!(Channel::new());
     class.wait_connection().await;
     let mut wrapper = UsbSerialWrapper::new(class, &*in_chan, &*out_chan);
@@ -389,28 +415,51 @@ async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
             match msg_out_chan.recv().await {
                 HostToKeyboard::RequestStats => {
                     msg_in_chan
-                        .send(KeyboardToHost::Stats {
-                            keypresses: TOTAL_KEYPRESSES
-                                .load(core::sync::atomic::Ordering::Relaxed),
-                        })
+                        .send((
+                            KeyboardToHost::Stats {
+                                keypresses: TOTAL_KEYPRESSES
+                                    .load(core::sync::atomic::Ordering::Relaxed),
+                            },
+                            Duration::from_millis(5),
+                        ))
                         .await;
                 }
-                HostToKeyboard::WritePixels { side, row, data } => match side {
+                HostToKeyboard::WritePixels {
+                    side,
+                    row,
+                    data_0,
+                    data_1,
+                } => match side {
                     keyboard_thing::messages::KeyboardSide::Left => {
                         lhs_display::OVERRIDE_CHAN
-                            .send(DisplayOverride { row, data })
+                            .send(DisplayOverride {
+                                row,
+                                data_0,
+                                data_1,
+                            })
                             .await;
                         interacted();
                     }
                     keyboard_thing::messages::KeyboardSide::Right => {
-                        COMMAND_CHAN.send(DomToSub::WritePixels { row, data }).await
+                        COMMAND_CHAN
+                            .send((
+                                DomToSub::WritePixels {
+                                    row,
+                                    data_0,
+                                    data_1,
+                                },
+                                Duration::from_millis(1),
+                            ))
+                            .await
                     }
                 },
             }
         }
     };
 
-    select3(wrapper.run(), eventer.run(msg_in_chan), handle).await;
+    let (e_a, e_b, e_c) = eventer.split_tasks(msg_in_chan);
+
+    select3(wrapper.run(), select3(e_a, e_b, e_c), handle).await;
 }
 
 #[embassy::task]

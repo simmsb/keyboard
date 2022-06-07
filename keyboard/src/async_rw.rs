@@ -11,7 +11,7 @@ pub trait AsyncRead {
     where
         Self: 'a;
 
-    fn read<'a>(&'a mut self, buf: &'a mut u8) -> Self::Fut<'a>;
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a>;
 }
 
 pub trait AsyncWrite {
@@ -30,8 +30,9 @@ impl<'d, T: uarte::Instance> AsyncRead for UarteRx<'d, T> {
     where
         Self: 'a;
 
-    fn read<'a>(&'a mut self, buf: &'a mut u8) -> Self::Fut<'a> {
-        UarteRx::read(self, core::slice::from_mut(buf))
+    #[inline]
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a> {
+        UarteRx::read(self, buf)
     }
 }
 
@@ -42,6 +43,7 @@ impl<'d, T: uarte::Instance> AsyncWrite for UarteTx<'d, T> {
     where
         Self: 'a;
 
+    #[inline]
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::Fut<'a> {
         UarteTx::write(self, buf)
     }
@@ -54,9 +56,12 @@ impl<const N: usize> AsyncRead for &Channel<ThreadModeRawMutex, u8, N> {
     where
         Self: 'a;
 
-    fn read<'a>(&'a mut self, buf: &'a mut u8) -> Self::Fut<'a> {
+    #[inline]
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a> {
         async {
-            *buf = self.recv().await;
+            for p in buf.iter_mut() {
+                *p = self.recv().await;
+            }
             Ok(())
         }
     }
@@ -69,6 +74,7 @@ impl<const N: usize> AsyncWrite for &Channel<ThreadModeRawMutex, u8, N> {
     where
         Self: 'a;
 
+    #[inline]
     fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::Fut<'a> {
         async move {
             for b in buf {

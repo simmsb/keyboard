@@ -10,6 +10,7 @@ bitvec = "1.0.0"
 clap = { version = "3.1.18", features = ["derive"] }
 color-eyre = "0.6.1"
 image = "0.24.2"
+itertools = "0.10.3"
 keyboard_shared = { version = "0.1.0", path = "../keyboard_shared" }
 postcard = { version = "0.7.3", features = ["alloc"] }
 tokio = { version = "1.19.1", features = ["rt", "macros", "io-util", "time"] }

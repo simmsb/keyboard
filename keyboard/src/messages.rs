@@ -9,6 +9,7 @@ use embassy::{
     util::select3,
 };
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
+use futures::Future;
 use postcard::{
     flavors::{Cobs, Slice},
     CobsAccumulator,
@@ -27,7 +28,11 @@ pub enum DomToSub {
     ResyncLeds(u16),
     Reset,
     SyncKeypresses(u16),
-    WritePixels { row: u8, data: [u8; 4] },
+    WritePixels {
+        row: u8,
+        data_0: [u8; 4],
+        data_1: [u8; 4],
+    },
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Format, Hash, Clone)]
@@ -95,7 +100,7 @@ where
 
         loop {
             let mut buf = [0u8; 1];
-            self.rx.read(&mut buf[0]).await.ok()?;
+            self.rx.read(&mut buf).await.ok()?;
             let mut window = &buf[..];
 
             'cobs: while !window.is_empty() {
@@ -143,7 +148,7 @@ where
         }
     }
 
-    async fn task(&mut self) {
+    async fn task(mut self) {
         loop {
             let _ = self.recv_task_inner().await;
         }
@@ -156,7 +161,7 @@ where
     TX: AsyncWrite,
     <TX as AsyncWrite>::Error: Format,
 {
-    async fn task(&mut self) {
+    async fn task(self) {
         loop {
             let val = self.mix_chan.recv().await;
 
@@ -172,14 +177,14 @@ where
 }
 
 impl<'a, T: Hash + Clone> EventSender<'a, T> {
-    async fn send(&self, cmd: T) {
+    async fn send(&self, cmd: T, timeout: Duration) {
         loop {
             let cmd = Command::new(cmd.clone());
             let uuid = cmd.uuid;
             let waiter = self.register_waiter(uuid).await;
             self.mix_chan.send(CmdOrAck::Cmd(cmd)).await;
 
-            match with_timeout(Duration::from_millis(5), waiter.wait()).await {
+            match with_timeout(timeout, waiter.wait()).await {
                 Ok(_) => {
                     debug!("Waiter for uuid {} completed", uuid);
                     return;
@@ -227,10 +232,11 @@ impl<'a, T, U, TX, RX> Eventer<'a, T, U, TX, RX> {
         Eventer::new(tx, rx, out_chan)
     }
 
-    pub async fn run<const N: usize>(
-        &mut self,
-        cmd_chan: &'static Channel<ThreadModeRawMutex, T, N>,
-    ) where
+    pub fn split_tasks<'s, const N: usize>(
+        &'s mut self,
+        cmd_chan: &'static Channel<ThreadModeRawMutex, (T, Duration), N>,
+    ) -> (impl Future + 's, impl Future + 's, impl Future + 's)
+    where
         T: Hash + Clone + Serialize + Format,
         U: Hash + DeserializeOwned + Format,
         TX: AsyncWrite,
@@ -242,12 +248,12 @@ impl<'a, T, U, TX, RX> Eventer<'a, T, U, TX, RX> {
             waiters: &self.waiters,
         };
 
-        let mut out_processor = EventOutProcessor {
+        let out_processor = EventOutProcessor {
             tx: &mut self.tx,
             mix_chan: &self.mix_chan,
         };
 
-        let mut in_processor = EventInProcessor {
+        let in_processor = EventInProcessor {
             rx: &mut self.rx,
             out_chan: self.out_chan.clone(),
             mix_chan: &self.mix_chan,
@@ -256,11 +262,11 @@ impl<'a, T, U, TX, RX> Eventer<'a, T, U, TX, RX> {
 
         let sender_proc = async move {
             loop {
-                let evt = cmd_chan.recv().await;
-                let _ = sender.send(evt).await;
+                let (evt, timeout) = cmd_chan.recv().await;
+                let _ = sender.send(evt, timeout).await;
             }
         };
 
-        select3(sender_proc, out_processor.task(), in_processor.task()).await;
+        (sender_proc, out_processor.task(), in_processor.task())
     }
 }

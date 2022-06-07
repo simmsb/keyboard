@@ -22,7 +22,8 @@ pub enum HostToKeyboard {
     WritePixels {
         side: KeyboardSide,
         row: u8,
-        data: [u8; 4],
+        data_0: [u8; 4],
+        data_1: [u8; 4],
     },
 }
 

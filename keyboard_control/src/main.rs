@@ -1,4 +1,9 @@
-use std::{fs::File, io::Seek, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    io::{Seek, SeekFrom},
+    path::PathBuf,
+    time::Duration,
+};
 
 use bitvec::{bitarr, order::Lsb0};
 use clap::Parser;
@@ -7,8 +12,12 @@ use image::{
     imageops::{dither, grayscale, resize, BiLevel, FilterType},
     AnimationDecoder,
 };
+use itertools::Itertools;
 use keyboard_shared::{CmdOrAck, Command, HostToKeyboard};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::Instant,
+};
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 use tracing::Instrument;
 
@@ -63,29 +72,31 @@ async fn main() -> Result<()> {
             .timeout(Duration::from_millis(100))
             .open_native_async()?;
 
-        let gif = File::open(&opts.file).section("Couldn't find your gif")?;
-
-        let mut frames = Vec::new();
-
-        let decoder =
-            image::codecs::gif::GifDecoder::new(&gif).section("Are you sure this is a gif")?;
-        for frame in decoder.into_frames() {
-            let frame = frame.section("Some frame is borked")?;
-
-            let mut image = grayscale(&resize(frame.buffer(), 64, 128, FilterType::Lanczos3));
-            dither(&mut image, &BiLevel);
-            emit_image(&image, &mut port).await?;
-            frames.push(image);
-        }
+        let mut gif = File::open(&opts.file).section("Couldn't find your gif")?;
 
         loop {
-            for frame in &frames {
-                emit_image(frame, &mut port).await?;
+            let decoder =
+                image::codecs::gif::GifDecoder::new(&gif).section("Are you sure this is a gif")?;
+
+            for frame in decoder.into_frames() {
+                let frame = frame.section("Some frame is borked")?;
+
+                let next_frame = Instant::now() + frame.delay().into();
+
+                let mut image = grayscale(&resize(frame.buffer(), 64, 128, FilterType::Lanczos3));
+                dither(&mut image, &BiLevel);
+                emit_image(&image, &mut port)
+                    .instrument(tracing::info_span!("sending frame", frame_time = ?Duration::from(frame.delay())))
+                    .await?;
+
+                tokio::time::sleep_until(next_frame).await;
             }
 
             if opts.no_loop {
                 break;
             }
+
+            gif.seek(SeekFrom::Start(0))?;
         }
     } else {
         let ports = tokio_serial::available_ports()?;
@@ -120,39 +131,32 @@ async fn emit_image(
 
     let mut o_buf = Vec::new();
 
-    for (row_idx, row) in lhs.iter().enumerate() {
+    let lhs_iter = lhs.chunks_exact(2).enumerate().map(|(row_idx, rows)| {
         let cmd = HostToKeyboard::WritePixels {
             side: keyboard_shared::KeyboardSide::Left,
-            row: row_idx as u8,
-            data: row.data,
+            row: (2 * row_idx) as u8,
+            data_0: rows[0].data,
+            data_1: rows[1].data,
         };
-        let cmd = CmdOrAck::Cmd(Command::new(cmd));
+        CmdOrAck::Cmd(Command::new(cmd))
+    });
 
-        let buf = postcard::to_allocvec_cobs(&cmd).map_err(|e| eyre!("Serde error: {}", e))?;
-        if (o_buf.len() + buf.len()) > 64 {
-            port.write_all(&o_buf)
-                .instrument(tracing::info_span!("sending row", row_idx, len = o_buf.len()))
-                .await?;
-            o_buf.clear();
-            let mut buf = [0u8; 128];
-            let _ = tokio::time::timeout(Duration::from_micros(100), port.read(&mut buf)).await;
-        }
-        o_buf.extend_from_slice(&buf);
-    }
-
-    for (row_idx, row) in rhs.iter().enumerate() {
+    let rhs_iter = rhs.chunks_exact(2).enumerate().map(|(row_idx, rows)| {
         let cmd = HostToKeyboard::WritePixels {
             side: keyboard_shared::KeyboardSide::Right,
-            row: row_idx as u8,
-            data: row.data,
+            row: (2 * row_idx) as u8,
+            data_0: rows[0].data,
+            data_1: rows[1].data,
         };
-        let cmd = CmdOrAck::Cmd(Command::new(cmd));
+        CmdOrAck::Cmd(Command::new(cmd))
+    });
 
+    // let rhs_iter = std::iter::empty();
+
+    for cmd in lhs_iter.interleave(rhs_iter) {
         let buf = postcard::to_allocvec_cobs(&cmd).map_err(|e| eyre!("Serde error: {}", e))?;
         if (o_buf.len() + buf.len()) > 64 {
-            port.write_all(&o_buf)
-                .instrument(tracing::info_span!("sending row", row_idx, len = o_buf.len()))
-                .await?;
+            port.write_all(&o_buf).await?;
             o_buf.clear();
             let mut buf = [0u8; 128];
             let _ = tokio::time::timeout(Duration::from_micros(100), port.read(&mut buf)).await;
@@ -163,7 +167,7 @@ async fn emit_image(
     if !o_buf.is_empty() {
         let _ = port.write_all(&o_buf).await;
         port.write_all(&o_buf)
-            .instrument(tracing::info_span!("sending remainder", len = o_buf.len()))
+            .instrument(tracing::debug_span!("sending remainder", len = o_buf.len()))
             .await?;
         let mut buf = [0u8; 128];
         let _ = tokio::time::timeout(Duration::from_micros(100), port.read(&mut buf)).await;

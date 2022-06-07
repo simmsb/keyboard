@@ -20,7 +20,7 @@ use embassy_nrf::{
     uarte::{self, UarteRx, UarteTx},
     Peripherals,
 };
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
     self as _,
@@ -42,7 +42,7 @@ static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::ne
 /// Channels that receive each debounced key press
 static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
 /// Channel commands are put on to be sent to the other side
-static COMMAND_CHAN: Channel<ThreadModeRawMutex, SubToDom, 4> = Channel::new();
+static COMMAND_CHAN: Channel<ThreadModeRawMutex, (SubToDom, Duration), 4> = Channel::new();
 
 static LED_COUNTER_TARGET: AtomicU16 = AtomicU16::new(0);
 
@@ -70,17 +70,27 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let irq = interrupt::take!(UARTE0_UART0);
     let uart = uarte::Uarte::new(p.UARTE0, irq, p.P0_08, p.P1_04, uart_config);
     static DOM_TO_SUB_CHAN: Channel<ThreadModeRawMutex, DomToSub, 16> = Channel::new();
-    let eventer = forever!(Eventer::<
+    // pain
+    let eventer: &mut Eventer<
+        '_,
+        SubToDom,
+        DomToSub,
+        UarteTx<'static, UARTE0>,
+        UarteRx<'static, UARTE0>,
+    > = forever!(Eventer::<
         '_,
         SubToDom,
         DomToSub,
         UarteTx<'static, UARTE0>,
         UarteRx<'static, UARTE0>,
     >::new_uart(uart, DOM_TO_SUB_CHAN.sender()));
+    let (e_a, e_b, e_c) = eventer.split_tasks(&COMMAND_CHAN);
 
     let irq = interrupt::take!(SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0);
     let mut config = twim::Config::default();
-    config.frequency = twim::Frequency::K400;
+    config.frequency = unsafe { core::mem::transmute(209715200) };
+    config.scl_high_drive = true;
+    config.sda_high_drive = true;
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
     let oled = forever!(Mutex::new(Oled::new(twim)));
 
@@ -98,7 +108,9 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner
         .spawn(read_events_task(DOM_TO_SUB_CHAN.receiver()))
         .unwrap();
-    spawner.spawn(events_task(eventer)).unwrap();
+    spawner.spawn(eventer_a(e_a)).unwrap();
+    spawner.spawn(eventer_b(e_b)).unwrap();
+    spawner.spawn(eventer_c(e_c)).unwrap();
 }
 
 #[embassy::task]
@@ -121,17 +133,25 @@ async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static
     display_timeout_task(oled).await;
 }
 
+type EventerA = impl Future + 'static;
+
 #[embassy::task]
-async fn events_task(
-    eventer: &'static mut Eventer<
-        'static,
-        SubToDom,
-        DomToSub,
-        UarteTx<'static, UARTE0>,
-        UarteRx<'static, UARTE0>,
-    >,
-) {
-    eventer.run(&COMMAND_CHAN).await;
+async fn eventer_a(f: EventerA) {
+    f.await;
+}
+
+type EventerB = impl Future + 'static;
+
+#[embassy::task]
+async fn eventer_b(f: EventerB) {
+    f.await;
+}
+
+type EventerC = impl Future + 'static;
+
+#[embassy::task]
+async fn eventer_c(f: EventerC) {
+    f.await;
 }
 
 #[embassy::task]
@@ -153,9 +173,17 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
                     interacted();
                 }
             }
-            DomToSub::WritePixels { row, data } => {
+            DomToSub::WritePixels {
+                row,
+                data_0,
+                data_1,
+            } => {
                 rhs_display::OVERRIDE_CHAN
-                    .send(DisplayOverride { row, data })
+                    .send(DisplayOverride {
+                        row,
+                        data_0,
+                        data_1,
+                    })
                     .await;
                 interacted();
             }
@@ -192,7 +220,7 @@ async fn keyboard_poll_task(
                 keyberon::layout::Event::Press(x, y) => SubToDom::key_pressed(x, y),
                 keyberon::layout::Event::Release(x, y) => SubToDom::key_released(x, y),
             };
-            COMMAND_CHAN.send(msg).await;
+            COMMAND_CHAN.send((msg, Duration::from_millis(10))).await;
             if event.is_press() {
                 TOTAL_KEYPRESSES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 KEYPRESS_EVENT.set();
