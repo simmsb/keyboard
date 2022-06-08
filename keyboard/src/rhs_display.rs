@@ -11,7 +11,7 @@ use embassy::{
 };
 use embassy_nrf::peripherals::TWISPI0;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    mono_font::MonoTextStyle,
     pixelcolor::BinaryColor,
     prelude::{Point, Primitive, Size},
     primitives::{Line, PrimitiveStyle, Rectangle},
@@ -20,6 +20,7 @@ use embedded_graphics::{
 use embedded_text::{style::TextBoxStyleBuilder, TextBox};
 use futures::StreamExt;
 use micromath::F32Ext;
+use profont::PROFONT_9_POINT;
 use ufmt::uwriteln;
 
 use crate::{cpm::SampleBuffer, event::Event, oled::Oled};
@@ -150,7 +151,7 @@ impl RHSDisplay {
     }
 
     async fn render_normal(&mut self) {
-        let character_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+        let character_style = MonoTextStyle::new(&PROFONT_9_POINT, BinaryColor::On);
         let textbox_style = TextBoxStyleBuilder::new()
             .height_mode(embedded_text::style::HeightMode::FitToText)
             .alignment(embedded_text::alignment::HorizontalAlignment::Justified)

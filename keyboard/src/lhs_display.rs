@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicU8;
+
 use bitvec::{order::Lsb0, view::BitView};
 use defmt::{debug, info};
 use embassy::{
@@ -8,8 +10,14 @@ use embassy::{
     util::{select, select3},
 };
 use embassy_nrf::peripherals::TWISPI0;
-use embedded_graphics::{pixelcolor::BinaryColor, prelude::Point, Drawable, Pixel};
+use embedded_graphics::{
+    pixelcolor::BinaryColor,
+    prelude::{Point, Primitive, Transform},
+    primitives::{Line, Polyline, PrimitiveStyle},
+    Drawable, Pixel,
+};
 use futures::StreamExt;
+use micromath::F32Ext;
 
 use crate::{event::Event, oled::Oled};
 
@@ -22,6 +30,12 @@ pub struct DisplayOverride {
 
 pub static KEYPRESS_EVENT: Event = Event::new();
 pub static OVERRIDE_CHAN: Channel<ThreadModeRawMutex, DisplayOverride, 256> = Channel::new();
+
+static BONGO_BASE: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/base.rs"));
+static PAW_LEFT_UP: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_left_up.rs"));
+static PAW_LEFT_DOWN: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_left_down.rs"));
+static PAW_RIGHT_UP: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_right_up.rs"));
+static PAW_RIGHT_DOWN: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_right_down.rs"));
 
 pub struct LHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
@@ -135,8 +149,54 @@ impl LHSDisplay {
     }
 
     async fn render_normal(&mut self) {
+        static OFFSET: AtomicU8 = AtomicU8::new(0);
+
+        let base_lines = BONGO_BASE.iter().map(|path| {
+            Polyline::new(path)
+                // .translate(Point::new(
+                //     - (OFFSET.fetch_add(1, core::sync::atomic::Ordering::Relaxed) as i32 / 2),
+                //     0,
+                // ))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+        });
+
+        let offset = OFFSET.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        let (left_paw, left_paw_offs, right_paw, right_paw_offs) = match offset % 3u8 {
+            0 => (PAW_LEFT_UP, 0, PAW_RIGHT_UP, 0),
+            1 => (PAW_LEFT_DOWN, 3, PAW_RIGHT_UP, 0),
+            2 => (PAW_LEFT_UP, 0, PAW_RIGHT_DOWN, 3),
+            _ => unreachable!(),
+        };
+
+        let left_paw_lines = left_paw.iter().map(|path| {
+            Polyline::new(path)
+                .translate(Point::new(2, 5 + left_paw_offs))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+        });
+
+        let right_paw_lines = right_paw.iter().map(|path| {
+            Polyline::new(path)
+                .translate(Point::new(23, 10 + right_paw_offs))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+        });
+
         {
-            let _ = self.oled.lock().await.draw(move |d| {}).await;
+            let _ = self
+                .oled
+                .lock()
+                .await
+                .draw(move |d| {
+                    for line in base_lines {
+                        let _ = line.draw(d);
+                    }
+                    for line in left_paw_lines {
+                        let _ = line.draw(d);
+                    }
+                    for line in right_paw_lines {
+                        let _ = line.draw(d);
+                    }
+                })
+                .await;
         }
     }
 }

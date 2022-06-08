@@ -42,6 +42,7 @@ num_enum = { version = "0.5.7", default-features = false }
 packed_struct = { version = "0.10.0", default-features = false }
 panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
 postcard = "0.7.3"
+profont = "0.6.1"
 serde = { version = "1.0.137", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
 ssd1306 = { git = "https://github.com/simmsb/ssd1306" }
@@ -97,3 +98,9 @@ incremental = false
 lto = 'false'
 opt-level = 3 # <-
 overflow-checks = false # <-
+
+[build-dependencies]
+glob = "0.3.0"
+stroke = { git = "https://github.com/dorianprill/stroke", version = "0.1.0" }
+svg = "0.10.0"
+svgtypes = "0.8.0"

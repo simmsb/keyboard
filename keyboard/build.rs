@@ -1,22 +1,186 @@
-//! This build script copies the `memory.x` file from the crate root into
-//! a directory where the linker can always find it at build time.
-//! For many projects this is optional, as the linker always searches the
-//! project root directory -- wherever `Cargo.toml` is. However, if you
-//! are using a workspace or have a more complicated build setup, this
-//! build script becomes required. Additionally, by requesting that
-//! Cargo re-run the build script whenever `memory.x` is changed,
-//! updating `memory.x` ensures a rebuild of the application with the
-//! new memory settings.
-
 use std::env;
 use std::fs::File;
 use std::io::Write;
+use std::ops::Deref;
 use std::path::PathBuf;
+
+use stroke::{CubicBezier, PointN};
+use svg::parser::Event;
+use svgtypes::{PathParser, PathSegment};
+
+fn point_as_tup(point: PointN<f64, 2>) -> (f64, f64) {
+    let mut it = point.into_iter();
+    let x = it.next().unwrap();
+    let y = it.next().unwrap();
+    (x, y)
+}
+
+fn process_paths(
+    it: impl Iterator<Item = Result<PathSegment, svgtypes::Error>>,
+) -> Vec<(f64, f64)> {
+    let mut x_pos = 0.0;
+    let mut y_pos = 0.0;
+    let mut initial_x = 0.0;
+    let mut initial_y = 0.0;
+
+    let mut out = vec![];
+    let mut emitted = false;
+
+    for segment in it {
+        let segment = segment.unwrap();
+
+        eprintln!("segment ({x_pos}, {y_pos}): {:?}", segment);
+
+        match segment {
+            PathSegment::MoveTo { abs, x, y } => {
+                if abs {
+                    x_pos = x;
+                    y_pos = y;
+                } else {
+                    x_pos += x;
+                    y_pos += y;
+                }
+
+                initial_x = x_pos;
+                initial_y = y_pos;
+
+                emitted = false;
+            }
+            PathSegment::LineTo { abs, x, y } => {
+                let (new_x, new_y) = if abs { (x, y) } else { (x_pos + x, y_pos + y) };
+                if !emitted {
+                    out.push((x_pos, y_pos));
+                    emitted = true;
+                }
+
+                out.push((new_x, new_y));
+                (x_pos, y_pos) = (new_x, new_y);
+            }
+            PathSegment::HorizontalLineTo { abs, x } => {
+                let (new_x, new_y) = if abs { (x, y_pos) } else { (x_pos + x, y_pos) };
+                if !emitted {
+                    out.push((x_pos, y_pos));
+                    emitted = true;
+                }
+
+                out.push((new_x, new_y));
+                (x_pos, y_pos) = (new_x, new_y);
+            }
+            PathSegment::VerticalLineTo { abs, y } => {
+                let (new_x, new_y) = if abs { (x_pos, y) } else { (x_pos, y_pos + y) };
+                if !emitted {
+                    out.push((x_pos, y_pos));
+                    emitted = true;
+                }
+
+                out.push((new_x, new_y));
+                (x_pos, y_pos) = (new_x, new_y);
+            }
+            PathSegment::CurveTo {
+                abs,
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
+                let (new_x, new_y) = if abs { (x, y) } else { (x_pos + x, y_pos + y) };
+
+                let (x1, y1) = if abs {
+                    (x1, y1)
+                } else {
+                    (x_pos + x1, y_pos + y1)
+                };
+
+                let (x2, y2) = if abs {
+                    (x2, y2)
+                } else {
+                    (x_pos + x2, y_pos + y2)
+                };
+
+                let curve = CubicBezier::new(
+                    PointN::new([x_pos, y_pos]),
+                    PointN::new([x1, y1]),
+                    PointN::new([x2, y2]),
+                    PointN::new([new_x, new_y]),
+                );
+
+                let length = curve.arclen(2);
+                let segments = (length).max(2.0).min(6.0);
+                let mut i = 0.0;
+
+                while i <= 1.01 {
+                    let next = curve.eval_casteljau(i);
+                    eprintln!("   curve {i}: {next:?}");
+                    out.push(point_as_tup(next));
+                    i += 1.0 / segments;
+                }
+                (x_pos, y_pos) = point_as_tup(curve.eval_casteljau(1.0));
+            }
+            PathSegment::ClosePath { .. } => {
+                out.push((initial_x, initial_y));
+            }
+            s => eprintln!("unhandled path segment type: {:?}", s),
+        }
+    }
+
+    out
+}
 
 fn main() {
     // Put `memory.x` in our output directory and ensure it's
     // on the linker search path.
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
+
+    println!("cargo:rerun-if-changed=bongo/");
+
+    let dpi = 96.0;
+    let ppmm = dpi / 25.4;
+
+    for path in glob::glob("bongo/*.svg").unwrap() {
+        let path = path.unwrap();
+        let mut content = String::new();
+        let svg = svg::open(&path, &mut content).unwrap();
+        let paths = svg
+            .filter_map(|e| {
+                if let Event::Tag("path", _, attributes) = e {
+                    eprintln!("path {:?}", attributes.get("id"));
+                    attributes
+                        .get("d")
+                        .map(|v| process_paths(PathParser::from(v.deref())))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut f = File::create(out.join(path.with_extension("rs").file_name().unwrap())).unwrap();
+
+        write!(f, "&[").unwrap();
+        for path in paths {
+            write!(f, "&[").unwrap();
+            for (x, y) in path {
+                write!(
+                    f,
+                    "::embedded_graphics::geometry::Point::new({}, {}),",
+                    (ppmm * x).round() as i32,
+                    (ppmm * y).round() as i32
+                )
+                .unwrap()
+            }
+            write!(f, "],").unwrap();
+        }
+        write!(f, "]").unwrap();
+
+        eprintln!(
+            "{:?}",
+            out.join(path.with_extension("rs").file_name().unwrap())
+        );
+    }
+
+    // panic!("lol");
+
     File::create(out.join("memory.x"))
         .unwrap()
         .write_all(include_bytes!("memory.x"))

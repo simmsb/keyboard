@@ -309,6 +309,7 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
 async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let event = PROCESSED_KEY_CHAN.recv().await;
+        interacted();
         {
             let mut layout = layout.lock().await;
             layout.event(event);
