@@ -1,7 +1,5 @@
-use core::sync::atomic::AtomicU8;
-
 use bitvec::{order::Lsb0, view::BitView};
-use defmt::{debug, info};
+use defmt::info;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::Channel,
@@ -13,11 +11,10 @@ use embassy_nrf::peripherals::TWISPI0;
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::{Point, Primitive, Transform},
-    primitives::{Line, Polyline, PrimitiveStyle},
+    primitives::{Polyline, PrimitiveStyle},
     Drawable, Pixel,
 };
 use futures::StreamExt;
-use micromath::F32Ext;
 
 use crate::{event::Event, oled::Oled};
 
@@ -50,7 +47,7 @@ impl LHSDisplay {
         Self {
             oled,
             sec_ticker: Ticker::every(Duration::from_secs(1)),
-            upd_ticker: Ticker::every(Duration::from_millis(100)),
+            upd_ticker: Ticker::every(Duration::from_secs(5)),
             buf: Default::default(),
             ticks: 0,
         }
@@ -149,8 +146,6 @@ impl LHSDisplay {
     }
 
     async fn render_normal(&mut self) {
-        static OFFSET: AtomicU8 = AtomicU8::new(0);
-
         let base_lines = BONGO_BASE.iter().map(|path| {
             Polyline::new(path)
                 // .translate(Point::new(
@@ -160,8 +155,7 @@ impl LHSDisplay {
                 .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
         });
 
-        let offset = OFFSET.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        let (left_paw, left_paw_offs, right_paw, right_paw_offs) = match offset % 3u8 {
+        let (left_paw, left_paw_offs, right_paw, right_paw_offs) = match self.ticks % 3 {
             0 => (PAW_LEFT_UP, 0, PAW_RIGHT_UP, 0),
             1 => (PAW_LEFT_DOWN, 3, PAW_RIGHT_UP, 0),
             2 => (PAW_LEFT_UP, 0, PAW_RIGHT_DOWN, 3),

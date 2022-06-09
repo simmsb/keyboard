@@ -6,7 +6,6 @@ use embassy::{
     channel::{Channel, Sender},
     mutex::Mutex,
     time::{with_timeout, Duration},
-    util::select3,
 };
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
 use futures::Future;

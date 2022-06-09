@@ -1,7 +1,7 @@
 use defmt::debug;
 use embassy::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_nrf::uarte::{self, UarteRx, UarteTx};
-use embassy_usb::driver::Driver;
+use embassy_usb::driver::{Driver, EndpointError};
 use embassy_usb_serial::CdcAcmClass;
 use futures::Future;
 
@@ -85,15 +85,15 @@ impl<const N: usize> AsyncWrite for &Channel<ThreadModeRawMutex, u8, N> {
     }
 }
 
-pub struct UsbSerialWrapper<'d, D: Driver<'d>, const N: usize> {
-    class: CdcAcmClass<'d, D>,
+pub struct UsbSerialWrapper<'a, 'd, D: Driver<'d>, const N: usize> {
+    class: &'a mut CdcAcmClass<'d, D>,
     in_chan: &'static Channel<ThreadModeRawMutex, u8, N>,
     out_chan: &'static Channel<ThreadModeRawMutex, u8, N>,
 }
 
-impl<'d, D: Driver<'d>, const N: usize> UsbSerialWrapper<'d, D, N> {
+impl<'a, 'd, D: Driver<'d>, const N: usize> UsbSerialWrapper<'a, 'd, D, N> {
     pub fn new(
-        class: CdcAcmClass<'d, D>,
+        class: &'a mut CdcAcmClass<'d, D>,
         in_chan: &'static Channel<ThreadModeRawMutex, u8, N>,
         out_chan: &'static Channel<ThreadModeRawMutex, u8, N>,
     ) -> Self {
@@ -104,7 +104,7 @@ impl<'d, D: Driver<'d>, const N: usize> UsbSerialWrapper<'d, D, N> {
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> Result<(), EndpointError> {
         loop {
             let a = async {
                 let mut v = heapless::Vec::<u8, 64>::new();
@@ -127,19 +127,20 @@ impl<'d, D: Driver<'d>, const N: usize> UsbSerialWrapper<'d, D, N> {
             let b = async {
                 let mut v = [0u8; N];
 
-                let n = self.class.read_packet(&mut v).await.unwrap();
+                let n = self.class.read_packet(&mut v).await?;
 
-                heapless::Vec::<u8, N>::from_slice(&v[..n]).unwrap()
+                Ok(heapless::Vec::<u8, N>::from_slice(&v[..n]).unwrap())
             };
 
             match embassy::util::select(a, b).await {
                 embassy::util::Either::First(to_pc) => {
-                    self.class.write_packet(&to_pc).await.unwrap();
+                    self.class.write_packet(&to_pc).await?;
                     if to_pc.len() as u16 == self.class.max_packet_size() {
-                        self.class.write_packet(&[]).await.unwrap();
+                        self.class.write_packet(&[]).await?;
                     }
                 }
                 embassy::util::Either::Second(from_pc) => {
+                    let from_pc = from_pc?;
                     for b in from_pc {
                         self.out_chan.send(b).await;
                     }

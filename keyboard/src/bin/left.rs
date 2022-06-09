@@ -401,66 +401,68 @@ async fn hid_task(
 
 #[embassy::task]
 async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
-    let in_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
-    let out_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
-    let msg_out_chan: &mut Channel<ThreadModeRawMutex, HostToKeyboard, 16> =
-        forever!(Channel::new());
-    let msg_in_chan: &mut Channel<ThreadModeRawMutex, (KeyboardToHost, Duration), 16> =
-        forever!(Channel::new());
-    class.wait_connection().await;
-    let mut wrapper = UsbSerialWrapper::new(class, &*in_chan, &*out_chan);
-    let mut eventer = Eventer::new(&*in_chan, &*out_chan, msg_out_chan.sender());
+    loop {
+        let in_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
+        let out_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
+        let msg_out_chan: &mut Channel<ThreadModeRawMutex, HostToKeyboard, 16> =
+            forever!(Channel::new());
+        let msg_in_chan: &mut Channel<ThreadModeRawMutex, (KeyboardToHost, Duration), 16> =
+            forever!(Channel::new());
+        class.wait_connection().await;
+        let mut wrapper = UsbSerialWrapper::new(&mut class, &*in_chan, &*out_chan);
+        let mut eventer = Eventer::new(&*in_chan, &*out_chan, msg_out_chan.sender());
 
-    let handle = async {
-        loop {
-            match msg_out_chan.recv().await {
-                HostToKeyboard::RequestStats => {
-                    msg_in_chan
-                        .send((
-                            KeyboardToHost::Stats {
-                                keypresses: TOTAL_KEYPRESSES
-                                    .load(core::sync::atomic::Ordering::Relaxed),
-                            },
-                            Duration::from_millis(5),
-                        ))
-                        .await;
-                }
-                HostToKeyboard::WritePixels {
-                    side,
-                    row,
-                    data_0,
-                    data_1,
-                } => match side {
-                    keyboard_thing::messages::KeyboardSide::Left => {
-                        lhs_display::OVERRIDE_CHAN
-                            .send(DisplayOverride {
-                                row,
-                                data_0,
-                                data_1,
-                            })
-                            .await;
-                        interacted();
-                    }
-                    keyboard_thing::messages::KeyboardSide::Right => {
-                        COMMAND_CHAN
+        let handle = async {
+            loop {
+                match msg_out_chan.recv().await {
+                    HostToKeyboard::RequestStats => {
+                        msg_in_chan
                             .send((
-                                DomToSub::WritePixels {
+                                KeyboardToHost::Stats {
+                                    keypresses: TOTAL_KEYPRESSES
+                                        .load(core::sync::atomic::Ordering::Relaxed),
+                                },
+                                Duration::from_millis(5),
+                            ))
+                            .await;
+                    }
+                    HostToKeyboard::WritePixels {
+                        side,
+                        row,
+                        data_0,
+                        data_1,
+                    } => match side {
+                        keyboard_thing::messages::KeyboardSide::Left => {
+                            lhs_display::OVERRIDE_CHAN
+                                .send(DisplayOverride {
                                     row,
                                     data_0,
                                     data_1,
-                                },
-                                Duration::from_millis(1),
-                            ))
-                            .await
-                    }
-                },
+                                })
+                                .await;
+                            interacted();
+                        }
+                        keyboard_thing::messages::KeyboardSide::Right => {
+                            COMMAND_CHAN
+                                .send((
+                                    DomToSub::WritePixels {
+                                        row,
+                                        data_0,
+                                        data_1,
+                                    },
+                                    Duration::from_millis(1),
+                                ))
+                                .await
+                        }
+                    },
+                }
             }
-        }
-    };
+        };
 
-    let (e_a, e_b, e_c) = eventer.split_tasks(msg_in_chan);
+        let (e_a, e_b, e_c) = eventer.split_tasks(msg_in_chan);
 
-    select3(wrapper.run(), select3(e_a, e_b, e_c), handle).await;
+        select3(wrapper.run(), select3(e_a, e_b, e_c), handle).await;
+    }
 }
 
 #[embassy::task]
