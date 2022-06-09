@@ -172,7 +172,7 @@ fn generate_image(paths: Vec<Vec<(f64, f64)>>) -> Vec<(i32, Vec<i32>)> {
 
     pixels
         .into_iter()
-        .map(|(y, pixels)| (y, pixels.map(|pix| pix.y).collect::<Vec<_>>()))
+        .map(|(y, pixels)| (y, pixels.map(|pix| pix.x).collect::<Vec<_>>()))
         .collect::<Vec<_>>()
 }
 
