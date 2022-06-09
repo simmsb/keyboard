@@ -689,6 +689,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "itertools"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "keyberon"
 version = "0.2.0"
 source = "git+https://github.com/TeXitoi/keyberon?branch=master#c0d35b53f875e8539348be0d1a713a3b670d5747"
@@ -737,6 +746,7 @@ dependencies = [
  "futures",
  "glob",
  "heapless",
+ "itertools",
  "keyberon",
  "keyboard_shared",
  "micromath 2.0.0",

@@ -49,7 +49,6 @@ impl SubToDom {
             SubToDom::KeyReleased(v) => {
                 Some(keyberon::layout::Event::Release((v >> 4) & 0xf, v & 0xf))
             }
-            _ => None,
         }
     }
 

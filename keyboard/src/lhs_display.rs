@@ -9,9 +9,9 @@ use embassy::{
 };
 use embassy_nrf::peripherals::TWISPI0;
 use embedded_graphics::{
+    draw_target::DrawTarget,
     pixelcolor::BinaryColor,
-    prelude::{Point, Primitive, Transform},
-    primitives::{Polyline, PrimitiveStyle},
+    prelude::Point,
     Drawable, Pixel,
 };
 use futures::StreamExt;
@@ -28,17 +28,32 @@ pub struct DisplayOverride {
 pub static KEYPRESS_EVENT: Event = Event::new();
 pub static OVERRIDE_CHAN: Channel<ThreadModeRawMutex, DisplayOverride, 256> = Channel::new();
 
-static BONGO_BASE: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/base.rs"));
-static PAW_LEFT_UP: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_left_up.rs"));
-static PAW_LEFT_DOWN: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_left_down.rs"));
-static PAW_RIGHT_UP: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_right_up.rs"));
-static PAW_RIGHT_DOWN: &[&[Point]] = include!(concat!(env!("OUT_DIR"), "/paw_right_down.rs"));
+static BONGO_BASE: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/base.rs"));
+static PAW_LEFT_UP: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_left_up.rs"));
+static PAW_LEFT_DOWN: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_left_down.rs"));
+static PAW_RIGHT_UP: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_right_up.rs"));
+static PAW_RIGHT_DOWN: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_right_down.rs"));
+
+#[inline]
+fn bongo_pixels(
+    data: &'static [(u8, &[u8])],
+    translation: Point,
+) -> impl Iterator<Item = Pixel<BinaryColor>> {
+    data.iter().copied().flat_map(move |(y, row)| {
+        row.iter().copied().map(move |x| {
+            Pixel(
+                Point::new(x as i32, y as i32) + translation,
+                BinaryColor::On,
+            )
+        })
+    })
+}
 
 pub struct LHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
     sec_ticker: Ticker,
     upd_ticker: Ticker,
-    buf: heapless::String<128>,
+    // buf: heapless::String<128>,
     ticks: u32,
 }
 
@@ -48,7 +63,7 @@ impl LHSDisplay {
             oled,
             sec_ticker: Ticker::every(Duration::from_secs(1)),
             upd_ticker: Ticker::every(Duration::from_secs(5)),
-            buf: Default::default(),
+            // buf: Default::default(),
             ticks: 0,
         }
     }
@@ -146,15 +161,6 @@ impl LHSDisplay {
     }
 
     async fn render_normal(&mut self) {
-        let base_lines = BONGO_BASE.iter().map(|path| {
-            Polyline::new(path)
-                // .translate(Point::new(
-                //     - (OFFSET.fetch_add(1, core::sync::atomic::Ordering::Relaxed) as i32 / 2),
-                //     0,
-                // ))
-                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-        });
-
         let (left_paw, left_paw_offs, right_paw, right_paw_offs) = match self.ticks % 3 {
             0 => (PAW_LEFT_UP, 0, PAW_RIGHT_UP, 0),
             1 => (PAW_LEFT_DOWN, 3, PAW_RIGHT_UP, 0),
@@ -162,33 +168,15 @@ impl LHSDisplay {
             _ => unreachable!(),
         };
 
-        let left_paw_lines = left_paw.iter().map(|path| {
-            Polyline::new(path)
-                .translate(Point::new(2, 5 + left_paw_offs))
-                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-        });
-
-        let right_paw_lines = right_paw.iter().map(|path| {
-            Polyline::new(path)
-                .translate(Point::new(23, 10 + right_paw_offs))
-                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-        });
-
         {
             let _ = self
                 .oled
                 .lock()
                 .await
                 .draw(move |d| {
-                    for line in base_lines {
-                        let _ = line.draw(d);
-                    }
-                    for line in left_paw_lines {
-                        let _ = line.draw(d);
-                    }
-                    for line in right_paw_lines {
-                        let _ = line.draw(d);
-                    }
+                    let _ = d.draw_iter(bongo_pixels(BONGO_BASE, Point::zero()));
+                    let _ = d.draw_iter(bongo_pixels(left_paw, Point::new(2, 5 + left_paw_offs)));
+                    let _ = d.draw_iter(bongo_pixels(right_paw, Point::new(2, 5 + right_paw_offs)));
                 })
                 .await;
         }

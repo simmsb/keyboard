@@ -1,9 +1,15 @@
-use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::env;
 
+use embedded_graphics::{
+    pixelcolor::BinaryColor,
+    prelude::Primitive,
+    primitives::{Polyline, PrimitiveStyle},
+};
+use itertools::Itertools;
 use stroke::{CubicBezier, PointN};
 use svg::parser::Event;
 use svgtypes::{PathParser, PathSegment};
@@ -128,15 +134,54 @@ fn process_paths(
     out
 }
 
+fn generate_image(paths: Vec<Vec<(f64, f64)>>) -> Vec<(i32, Vec<i32>)> {
+    let dpi = 96.0;
+    let ppmm = dpi / 25.4;
+
+    let paths = paths
+        .into_iter()
+        .map(|path| {
+            path.into_iter()
+                .map(|(x, y)| {
+                    embedded_graphics::prelude::Point::new((x * ppmm) as i32, (y * ppmm) as i32)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    let pixels = paths
+        .iter()
+        .flat_map(|path| {
+            let line =
+                Polyline::new(path).into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2));
+
+            line.pixels()
+        })
+        .filter_map(|pix| {
+            if pix.1 == BinaryColor::On {
+                Some(pix.0)
+            } else {
+                None
+            }
+        })
+        .dedup()
+        .filter(|pos| (0..32).contains(&pos.x))
+        .filter(|pos| (0..128).contains(&pos.y))
+        .sorted_by_key(|pos| pos.y)
+        .group_by(|pos| pos.y);
+
+    pixels
+        .into_iter()
+        .map(|(y, pixels)| (y, pixels.map(|pix| pix.y).collect::<Vec<_>>()))
+        .collect::<Vec<_>>()
+}
+
 fn main() {
     // Put `memory.x` in our output directory and ensure it's
     // on the linker search path.
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-changed=bongo/");
-
-    let dpi = 96.0;
-    let ppmm = dpi / 25.4;
 
     for path in glob::glob("bongo/*.svg").unwrap() {
         let path = path.unwrap();
@@ -154,22 +199,17 @@ fn main() {
                 }
             })
             .collect::<Vec<_>>();
+        let image = generate_image(paths);
 
         let mut f = File::create(out.join(path.with_extension("rs").file_name().unwrap())).unwrap();
 
         write!(f, "&[").unwrap();
-        for path in paths {
-            write!(f, "&[").unwrap();
-            for (x, y) in path {
-                write!(
-                    f,
-                    "::embedded_graphics::geometry::Point::new({}, {}),",
-                    (ppmm * x).round() as i32,
-                    (ppmm * y).round() as i32
-                )
-                .unwrap()
+        for (y, row) in image {
+            write!(f, "({}, &[", u8::try_from(y).unwrap()).unwrap();
+            for x in row {
+                write!(f, "{},", u8::try_from(x).unwrap()).unwrap()
             }
-            write!(f, "],").unwrap();
+            write!(f, "]),").unwrap();
         }
         write!(f, "]").unwrap();
 
