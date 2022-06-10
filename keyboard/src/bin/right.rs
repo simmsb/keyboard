@@ -24,7 +24,7 @@ use futures::{Future, StreamExt};
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
     self as _,
-    cpm::{cpm_task, Cpm, SampleBuffer},
+    cps::{cps_task, Cps, SampleBuffer},
     forever, init_heap,
     layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
@@ -94,12 +94,11 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
     let oled = forever!(Mutex::new(Oled::new(twim)));
 
-    let cpm_samples = forever!(Mutex::new(SampleBuffer::default()));
+    let cps_samples = forever!(Mutex::new(SampleBuffer::default()));
+    let cps = Cps::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES, cps_samples);
 
-    let cpm = Cpm::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES, cpm_samples);
-
-    spawner.spawn(cpm_task(cpm)).unwrap();
-    spawner.spawn(oled_task(oled, cpm_samples)).unwrap();
+    spawner.spawn(cps_task(cps)).unwrap();
+    spawner.spawn(oled_task(oled, cps_samples)).unwrap();
     spawner.spawn(oled_timeout_task(oled)).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
     spawner

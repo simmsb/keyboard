@@ -1,3 +1,6 @@
+use core::sync::atomic::AtomicU32;
+
+use atomic_float::AtomicF32;
 use bitvec::{order::Lsb0, view::BitView};
 use defmt::info;
 use embassy::{
@@ -5,14 +8,11 @@ use embassy::{
     channel::Channel,
     mutex::Mutex,
     time::{Duration, Instant, Ticker},
-    util::{select, select3},
+    util::select3,
 };
 use embassy_nrf::peripherals::TWISPI0;
 use embedded_graphics::{
-    draw_target::DrawTarget,
-    pixelcolor::BinaryColor,
-    prelude::Point,
-    Drawable, Pixel,
+    draw_target::DrawTarget, pixelcolor::BinaryColor, prelude::Point, Drawable, Pixel,
 };
 use futures::StreamExt;
 
@@ -25,36 +25,80 @@ pub struct DisplayOverride {
     pub data_1: [u8; 4],
 }
 
+pub static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
+pub static AVERAGE_KEYPRESSES: AtomicF32 = AtomicF32::new(0.0);
 pub static KEYPRESS_EVENT: Event = Event::new();
 pub static OVERRIDE_CHAN: Channel<ThreadModeRawMutex, DisplayOverride, 256> = Channel::new();
 
-static BONGO_BASE: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/base.rs"));
-static PAW_LEFT_UP: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_left_up.rs"));
-static PAW_LEFT_DOWN: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_left_down.rs"));
-static PAW_RIGHT_UP: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_right_up.rs"));
-static PAW_RIGHT_DOWN: &[(u8, &[u8])] = include!(concat!(env!("OUT_DIR"), "/paw_right_down.rs"));
+type BongoImage = &'static [(u8, &'static [(u8, bool)])];
+
+static BONGO_BASE: BongoImage = include!(concat!(env!("OUT_DIR"), "/base.rs"));
+static PAW_LEFT_UP: &[(u8, &[(u8, bool)])] = include!(concat!(env!("OUT_DIR"), "/left_paw_up.rs"));
+static PAW_LEFT_DOWN: &[(u8, &[(u8, bool)])] =
+    include!(concat!(env!("OUT_DIR"), "/left_paw_down.rs"));
+static PAW_RIGHT_UP: &[(u8, &[(u8, bool)])] =
+    include!(concat!(env!("OUT_DIR"), "/right_paw_up.rs"));
+static PAW_RIGHT_DOWN: &[(u8, &[(u8, bool)])] =
+    include!(concat!(env!("OUT_DIR"), "/right_paw_down.rs"));
 
 #[inline]
-fn bongo_pixels(
-    data: &'static [(u8, &[u8])],
-    translation: Point,
-) -> impl Iterator<Item = Pixel<BinaryColor>> {
-    data.iter().copied().flat_map(move |(y, row)| {
-        row.iter().copied().map(move |x| {
-            Pixel(
-                Point::new(x as i32, y as i32) + translation,
-                BinaryColor::On,
-            )
-        })
+fn bongo_pixels(data: BongoImage) -> impl Iterator<Item = Pixel<BinaryColor>> {
+    data.iter().copied().flat_map(|(y, row)| {
+        row.iter()
+            .copied()
+            .map(move |(x, on)| Pixel(Point::new(x as i32, y as i32), BinaryColor::from(on)))
     })
+}
+
+enum BongoState {
+    BothUp,
+    LeftDown,
+    RightDown,
+    BothDown,
+}
+
+impl BongoState {
+    fn next(&self, cps: f32) -> BongoState {
+        if cps < 0.1 {
+            match self {
+                BongoState::BothUp => Self::LeftDown,
+                BongoState::LeftDown => Self::RightDown,
+                BongoState::RightDown => Self::BothUp,
+                BongoState::BothDown => Self::BothUp,
+            }
+        } else if cps < 3.0 {
+            match self {
+                BongoState::BothUp => Self::LeftDown,
+                BongoState::LeftDown => Self::RightDown,
+                BongoState::RightDown => Self::LeftDown,
+                BongoState::BothDown => Self::LeftDown,
+            }
+        } else {
+            match self {
+                BongoState::BothUp => Self::BothDown,
+                BongoState::LeftDown => Self::BothDown,
+                BongoState::RightDown => Self::BothDown,
+                BongoState::BothDown => Self::BothUp,
+            }
+        }
+    }
+
+    fn images(&self) -> (BongoImage, BongoImage) {
+        match self {
+            BongoState::BothUp => (PAW_LEFT_UP, PAW_RIGHT_UP),
+            BongoState::LeftDown => (PAW_LEFT_DOWN, PAW_RIGHT_UP),
+            BongoState::RightDown => (PAW_LEFT_UP, PAW_RIGHT_DOWN),
+            BongoState::BothDown => (PAW_LEFT_DOWN, PAW_RIGHT_DOWN),
+        }
+    }
 }
 
 pub struct LHSDisplay {
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
     sec_ticker: Ticker,
-    upd_ticker: Ticker,
     // buf: heapless::String<128>,
     ticks: u32,
+    bongo_state: BongoState,
 }
 
 impl LHSDisplay {
@@ -62,9 +106,9 @@ impl LHSDisplay {
         Self {
             oled,
             sec_ticker: Ticker::every(Duration::from_secs(1)),
-            upd_ticker: Ticker::every(Duration::from_secs(5)),
             // buf: Default::default(),
             ticks: 0,
+            bongo_state: BongoState::BothUp,
         }
     }
 
@@ -88,8 +132,12 @@ impl LHSDisplay {
             )
             .await
             {
-                embassy::util::Either3::First(()) => {}
-                embassy::util::Either3::Second(()) => {}
+                embassy::util::Either3::First(()) => {
+                    self.update_bongo();
+                }
+                embassy::util::Either3::Second(()) => {
+                    self.update_bongo();
+                }
                 embassy::util::Either3::Third(o) => {
                     self.read_in_overrides(o).await;
                     override_timeout = Some(Instant::now() + Duration::from_secs(1));
@@ -98,19 +146,19 @@ impl LHSDisplay {
         }
     }
 
+    fn update_bongo(&mut self) {
+        self.bongo_state = self
+            .bongo_state
+            .next(AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed));
+    }
+
     async fn wait_for_signal() {
         KEYPRESS_EVENT.wait().await;
     }
 
     async fn tick_update(&mut self) {
-        let a = async {
-            self.sec_ticker.next().await;
-            self.ticks += 1;
-        };
-        let b = async {
-            self.upd_ticker.next().await;
-        };
-        select(a, b).await;
+        self.sec_ticker.next().await;
+        self.ticks = self.ticks.wrapping_add(1);
     }
 
     async fn read_in_overrides(&mut self, initial: DisplayOverride) {
@@ -161,12 +209,7 @@ impl LHSDisplay {
     }
 
     async fn render_normal(&mut self) {
-        let (left_paw, left_paw_offs, right_paw, right_paw_offs) = match self.ticks % 3 {
-            0 => (PAW_LEFT_UP, 0, PAW_RIGHT_UP, 0),
-            1 => (PAW_LEFT_DOWN, 3, PAW_RIGHT_UP, 0),
-            2 => (PAW_LEFT_UP, 0, PAW_RIGHT_DOWN, 3),
-            _ => unreachable!(),
-        };
+        let (left_paw, right_paw) = self.bongo_state.images();
 
         {
             let _ = self
@@ -174,9 +217,9 @@ impl LHSDisplay {
                 .lock()
                 .await
                 .draw(move |d| {
-                    let _ = d.draw_iter(bongo_pixels(BONGO_BASE, Point::zero()));
-                    let _ = d.draw_iter(bongo_pixels(left_paw, Point::new(2, 5 + left_paw_offs)));
-                    let _ = d.draw_iter(bongo_pixels(right_paw, Point::new(2, 5 + right_paw_offs)));
+                    let _ = d.draw_iter(bongo_pixels(BONGO_BASE));
+                    let _ = d.draw_iter(bongo_pixels(left_paw));
+                    let _ = d.draw_iter(bongo_pixels(right_paw));
                 })
                 .await;
         }

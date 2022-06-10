@@ -31,10 +31,13 @@ use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::M
 use keyboard_thing::{
     self as _,
     async_rw::UsbSerialWrapper,
+    cps::{cps_task, Cps, SampleBuffer},
     forever, init_heap,
     layout::{Layout, COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
-    lhs_display::{self, DisplayOverride, LHSDisplay},
+    lhs_display::{
+        self, DisplayOverride, LHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES,
+    },
     messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
     wrapping_id::WrappingID,
@@ -44,7 +47,7 @@ use num_enum::TryFromPrimitive;
 use packed_struct::PackedStruct;
 use usbd_human_interface_device::{device::keyboard::NKROBootKeyboardReport, page::Keyboard};
 
-static TOTAL_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
+static TOTAL_LHS_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 
@@ -187,6 +190,10 @@ async fn main(spawner: Spawner, p: Peripherals) {
     let twim = Twim::new(p.TWISPI0, irq, p.P0_17, p.P0_20, config);
     let oled = forever!(Mutex::new(Oled::new(twim)));
 
+    let cps_samples = forever!(Mutex::new(SampleBuffer::default()));
+    let cps = Cps::new(&TOTAL_KEYPRESSES, &AVERAGE_KEYPRESSES, cps_samples);
+
+    spawner.spawn(cps_task(cps)).unwrap();
     spawner.spawn(usb_task(usb)).unwrap();
     spawner.spawn(usb_serial_task(serial_class)).unwrap();
     spawner.spawn(hid_task(hid)).unwrap();
@@ -232,7 +239,7 @@ async fn sync_kp_task() {
     let mut last = 0u32;
 
     loop {
-        let current = TOTAL_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
+        let current = TOTAL_LHS_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed);
         let diff = current - last;
 
         if diff != 0 {
@@ -309,6 +316,10 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
 async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let event = PROCESSED_KEY_CHAN.recv().await;
+        let mut count = if event.is_press() { 1 } else { 0 };
+        if event.is_press() {
+            KEYPRESS_EVENT.set();
+        }
         interacted();
         {
             let mut layout = layout.lock().await;
@@ -317,8 +328,10 @@ async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>)
             while let Ok(event) = PROCESSED_KEY_CHAN.try_recv() {
                 debug!("evt: press: {} {:?}", event.is_press(), event.coord());
                 layout.event(event);
+                count += if event.is_press() { 1 } else { 0 };
             }
         }
+        TOTAL_KEYPRESSES.fetch_add(count, core::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -341,10 +354,8 @@ async fn keyboard_poll_task(
 
         let events = chording.tick(events);
 
-        TOTAL_KEYPRESSES.fetch_add(
-            events.iter().filter(|e| e.is_press()).count() as u32,
-            core::sync::atomic::Ordering::Relaxed,
-        );
+        let count = events.iter().filter(|e| e.is_press()).count() as u32;
+        TOTAL_LHS_KEYPRESSES.fetch_add(count, core::sync::atomic::Ordering::Relaxed);
 
         for event in events {
             PROCESSED_KEY_CHAN.send(event).await;

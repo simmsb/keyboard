@@ -9,23 +9,23 @@ use embassy::{
 use futures::StreamExt;
 use heapless::HistoryBuffer;
 
-pub const CPM_PERIOD: Duration = Duration::from_secs(3);
-pub const CPM_SAMPLES: usize = 32;
-pub const CPM_RATE: Duration = Duration::from_ticks(CPM_PERIOD.as_ticks() / CPM_SAMPLES as u64);
+pub const CPS_PERIOD: Duration = Duration::from_secs(3);
+pub const CPS_SAMPLES: usize = 32;
+pub const CPS_RATE: Duration = Duration::from_ticks(CPS_PERIOD.as_ticks() / CPS_SAMPLES as u64);
 
-pub type SampleBuffer = HistoryBuffer<u8, CPM_SAMPLES>;
+pub type SampleBuffer = HistoryBuffer<u8, CPS_SAMPLES>;
 
-pub struct Cpm {
+pub struct Cps {
     total: &'static AtomicU32,
     samples: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
     avg: &'static AtomicF32,
 }
 
-impl Cpm {
+impl Cps {
     pub fn new(
         total: &'static AtomicU32,
         avg: &'static AtomicF32,
-        samples: &'static Mutex<ThreadModeRawMutex, HistoryBuffer<u8, CPM_SAMPLES>>,
+        samples: &'static Mutex<ThreadModeRawMutex, HistoryBuffer<u8, CPS_SAMPLES>>,
     ) -> Self {
         Self {
             total,
@@ -39,23 +39,28 @@ impl Cpm {
         samples.write(sample);
         self.avg.store(
             samples.iter().map(|s| *s as u16).sum::<u16>() as f32
-                / (samples.len() as f32 / CPM_PERIOD.as_secs() as f32),
+                / (samples.len() as f32 / CPS_PERIOD.as_secs() as f32),
             core::sync::atomic::Ordering::Relaxed,
         );
     }
 }
 
 #[embassy::task]
-pub async fn cpm_task(mut cpm: Cpm) {
-    let mut ticker = Ticker::every(CPM_RATE);
+pub async fn cps_task(mut cps: Cps) {
+    let mut ticker = Ticker::every(CPS_RATE);
 
     let mut last = 0u32;
 
     loop {
-        let current = cpm.total.load(core::sync::atomic::Ordering::Relaxed);
+        let current = cps.total.load(core::sync::atomic::Ordering::Relaxed);
         let diff = current - last;
 
-        cpm.sample(diff as u8).await;
+        cps.sample(diff as u8).await;
+
+        // defmt::debug!("kp: {}, tot: {}",
+        //        AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed),
+        //               current
+        // );
 
         last = current;
 

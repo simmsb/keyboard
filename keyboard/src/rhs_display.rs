@@ -23,7 +23,7 @@ use micromath::F32Ext;
 use profont::PROFONT_9_POINT;
 use ufmt::uwriteln;
 
-use crate::{cpm::SampleBuffer, event::Event, oled::Oled};
+use crate::{cps::SampleBuffer, event::Event, oled::Oled};
 
 #[derive(defmt::Format)]
 pub struct DisplayOverride {

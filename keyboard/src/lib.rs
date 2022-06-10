@@ -8,7 +8,7 @@
 extern crate alloc;
 
 pub mod async_rw;
-pub mod cpm;
+pub mod cps;
 pub mod event;
 pub mod layout;
 pub mod leds;
