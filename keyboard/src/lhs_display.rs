@@ -50,6 +50,7 @@ fn bongo_pixels(data: BongoImage) -> impl Iterator<Item = Pixel<BinaryColor>> {
     })
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum BongoState {
     BothUp,
     LeftDown,
@@ -58,14 +59,18 @@ enum BongoState {
 }
 
 impl BongoState {
-    fn next(&self, cps: f32) -> BongoState {
-        if cps < 0.1 {
+    fn next(&self, cps: f32, source: BongoUpdateSource) -> BongoState {
+        if (source == BongoUpdateSource::FromKeyPress && cps < 0.3)
+            || (source == BongoUpdateSource::FromTicker && cps < 1.0)
+        {
             match self {
                 BongoState::BothUp => Self::LeftDown,
                 BongoState::LeftDown => Self::RightDown,
                 BongoState::RightDown => Self::BothUp,
                 BongoState::BothDown => Self::BothUp,
             }
+        } else if source == BongoUpdateSource::FromTicker {
+            *self
         } else if cps < 3.0 {
             match self {
                 BongoState::BothUp => Self::LeftDown,
@@ -101,6 +106,12 @@ pub struct LHSDisplay {
     bongo_state: BongoState,
 }
 
+#[derive(PartialEq, Eq)]
+enum BongoUpdateSource {
+    FromTicker,
+    FromKeyPress,
+}
+
 impl LHSDisplay {
     pub fn new(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) -> Self {
         Self {
@@ -133,10 +144,10 @@ impl LHSDisplay {
             .await
             {
                 embassy::util::Either3::First(()) => {
-                    self.update_bongo();
+                    self.update_bongo(BongoUpdateSource::FromKeyPress);
                 }
                 embassy::util::Either3::Second(()) => {
-                    self.update_bongo();
+                    self.update_bongo(BongoUpdateSource::FromTicker);
                 }
                 embassy::util::Either3::Third(o) => {
                     self.read_in_overrides(o).await;
@@ -146,10 +157,11 @@ impl LHSDisplay {
         }
     }
 
-    fn update_bongo(&mut self) {
-        self.bongo_state = self
-            .bongo_state
-            .next(AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed));
+    fn update_bongo(&mut self, source: BongoUpdateSource) {
+        self.bongo_state = self.bongo_state.next(
+            AVERAGE_KEYPRESSES.load(core::sync::atomic::Ordering::Relaxed),
+            source,
+        );
     }
 
     async fn wait_for_signal() {
