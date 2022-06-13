@@ -3,7 +3,7 @@ use core::hash::Hash;
 use defmt::{debug, warn, Format};
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::{Channel, Sender},
+    channel::mpmc::{Channel, Sender},
     mutex::Mutex,
     time::{with_timeout, Duration},
 };

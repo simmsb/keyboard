@@ -7,7 +7,7 @@ use core::sync::atomic::AtomicU16;
 use defmt::debug;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::{Channel, Receiver},
+    channel::mpmc::{Channel, Receiver},
     executor::Spawner,
     mutex::Mutex,
     time::{Duration, Ticker, Timer},

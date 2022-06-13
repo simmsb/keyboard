@@ -1,5 +1,5 @@
 use defmt::debug;
-use embassy::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
+use embassy::{blocking_mutex::raw::ThreadModeRawMutex, channel::mpmc::Channel};
 use embassy_nrf::uarte::{self, UarteRx, UarteTx};
 use embassy_usb::driver::{Driver, EndpointError};
 use embassy_usb_serial::CdcAcmClass;

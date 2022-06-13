@@ -5,7 +5,7 @@ use bitvec::{order::Lsb0, view::BitView};
 use defmt::info;
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Channel,
+    channel::mpmc::Channel,
     mutex::Mutex,
     time::{Duration, Instant, Ticker},
     util::select3,

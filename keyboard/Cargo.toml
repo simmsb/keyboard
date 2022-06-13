@@ -48,7 +48,7 @@ smart-leds = "0.3.0"
 ssd1306 = { git = "https://github.com/simmsb/ssd1306" }
 ufmt = "0.1.0"
 usbd-hid = "0.6.0"
-usbd-human-interface-device = "0.2.0"
+usbd-human-interface-device = "0.2.1"
 # [patch.crates-io]
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
 

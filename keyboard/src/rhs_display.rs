@@ -4,7 +4,7 @@ use atomic_float::AtomicF32;
 use bitvec::{order::Lsb0, view::BitView};
 use embassy::{
     blocking_mutex::raw::ThreadModeRawMutex,
-    channel::Channel,
+    channel::mpmc::Channel,
     mutex::Mutex,
     time::{Duration, Instant, Ticker},
     util::{select, select3},

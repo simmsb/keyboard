@@ -285,9 +285,9 @@ dependencies = [
 
 [[package]]
 name = "delegate"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35c47a31748d9cfa641f6cccb3608385fafe261ba36054f3d40d5a3ca11eb1af"
+checksum = "d70a2d4995466955a415223acf3c9c934b9ff2339631cdf4ffc893da4bacd717"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -324,7 +324,7 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 [[package]]
 name = "embassy"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "atomic-polyfill",
  "cfg-if",
@@ -341,9 +341,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-cortex-m"
+version = "0.1.0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
+dependencies = [
+ "atomic-polyfill",
+ "cfg-if",
+ "cortex-m",
+ "critical-section",
+ "embassy",
+ "embassy-hal-common",
+ "embassy-macros",
+]
+
+[[package]]
 name = "embassy-hal-common"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "cortex-m",
  "embassy",
@@ -353,7 +367,7 @@ dependencies = [
 [[package]]
 name = "embassy-macros"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -364,7 +378,7 @@ dependencies = [
 [[package]]
 name = "embassy-nrf"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -372,6 +386,7 @@ dependencies = [
  "critical-section",
  "defmt",
  "embassy",
+ "embassy-cortex-m",
  "embassy-hal-common",
  "embassy-macros",
  "embassy-usb",
@@ -391,7 +406,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "defmt",
  "embassy",
@@ -401,7 +416,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-hid"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "defmt",
  "embassy",
@@ -414,7 +429,7 @@ dependencies = [
 [[package]]
 name = "embassy-usb-serial"
 version = "0.1.0"
-source = "git+https://github.com/embassy-rs/embassy#34673f52c9c23179f0274726a5aa1877dd554df0"
+source = "git+https://github.com/embassy-rs/embassy#db685c04049449ac3e4f256f2e7e26dad550d94c"
 dependencies = [
  "defmt",
  "embassy",
@@ -751,7 +766,7 @@ dependencies = [
 [[package]]
 name = "keyberon"
 version = "0.2.0"
-source = "git+https://github.com/TeXitoi/keyberon?branch=master#c0d35b53f875e8539348be0d1a713a3b670d5747"
+source = "git+https://github.com/TeXitoi/keyberon?branch=master#d56d8580213cc260b0a39f2b88b5931885a83b2d"
 dependencies = [
  "arraydeque",
  "either",
@@ -764,7 +779,7 @@ dependencies = [
 [[package]]
 name = "keyberon-macros"
 version = "0.1.0"
-source = "git+https://github.com/TeXitoi/keyberon?branch=master#c0d35b53f875e8539348be0d1a713a3b670d5747"
+source = "git+https://github.com/TeXitoi/keyberon?branch=master#d56d8580213cc260b0a39f2b88b5931885a83b2d"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -1249,7 +1264,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.9",
+ "semver 1.0.10",
 ]
 
 [[package]]
@@ -1269,9 +1284,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cb243bdfdb5936c8dc3c45762a19d12ab4550cdc753bc247637d4ec35a040fd"
+checksum = "a41d061efea015927ac527063765e73601444cdc344ba855bc7bd44578b25e1c"
 
 [[package]]
 name = "semver-parser"
@@ -1473,9 +1488,9 @@ dependencies = [
 
 [[package]]
 name = "usbd-human-interface-device"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "101be15617fcb5c3c57b46ab79a52e67d801d6543e3b524cd1a7c3448e931bb7"
+checksum = "4f01ee9d05b01603f4d6ee43e7d0ebe140f16567d6ff99fde0dc1ea6e7564e65"
 dependencies = [
  "delegate",
  "embedded-time",
