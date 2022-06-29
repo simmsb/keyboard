@@ -3,6 +3,7 @@ use color_eyre::Result;
 
 mod metrics;
 mod render;
+pub mod util;
 
 fn install_tracing() -> color_eyre::Result<()> {
     use tracing_subscriber::layer::SubscriberExt;

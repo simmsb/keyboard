@@ -30,11 +30,11 @@ services:
     depends_on:
       - pushgateway
     restart: always
-    command: metrics -p "http://pushgateway:9091" /dev/ttyACM0
+    command: metrics -p "http://pushgateway:9091"
     networks:
       - prometheus
     volumes:
-      - /dev/ttyACM0:/dev/ttyACM0
+      - /dev:/dev
     privileged: true
 
 networks:

@@ -17,8 +17,10 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     time::Instant,
 };
-use tokio_serial::{SerialPortBuilderExt, SerialStream};
+use tokio_serial::SerialStream;
 use tracing::Instrument;
+
+use crate::util::open_port;
 
 /// Render a gif to the keyboard displays
 #[derive(Debug, clap::Parser)]
@@ -29,14 +31,12 @@ pub struct RenderOpts {
     #[clap(long, short)]
     no_loop: bool,
 
-    port: String,
+    port: Option<String>,
 }
 
 impl RenderOpts {
     pub async fn execute(self) -> color_eyre::Result<()> {
-        let mut port = tokio_serial::new(&self.port, 921_600)
-            .timeout(Duration::from_millis(100))
-            .open_native_async()?;
+        let mut port = open_port(self.port.as_deref())?;
 
         let mut gif = File::open(&self.file).section("Couldn't find your gif")?;
 
