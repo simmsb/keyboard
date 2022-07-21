@@ -1,12 +1,9 @@
+use cichlid::HSV;
 use embassy_nrf::{gpio::Pin, peripherals::PWM0, Unborrow};
 use keyberon::layout::Event;
 use micromath::F32Ext;
 use nrf_smartled::RGB8;
-use smart_leds::{
-    gamma,
-    hsv::{hsv2rgb, Hsv},
-    SmartLedsWrite,
-};
+use smart_leds::{gamma, SmartLedsWrite};
 
 use crate::layout::{COLS_PER_SIDE, ROWS};
 
@@ -59,19 +56,22 @@ where
     buf_a.into_iter().chain(buf_b.into_iter())
 }
 
-pub fn rainbow_single(x: u8, y: u8, offset: u8) -> Hsv {
-    Hsv {
-        hue: x
-            .wrapping_mul(6)
+pub fn rainbow_single(x: u8, y: u8, offset: u8) -> HSV {
+    HSV {
+        h: x.wrapping_mul(6)
             .wrapping_add(y.wrapping_mul(2))
             .wrapping_add(offset),
-        sat: 255,
-        val: 127,
+        s: 255,
+        v: 127,
     }
 }
 
+fn conv_colour(c: cichlid::ColorRGB) -> RGB8 {
+    RGB8::new(c.r, c.g, c.b)
+}
+
 pub fn rainbow(offset: u8) -> impl Iterator<Item = RGB8> {
-    colour_gen(move |x, y| hsv2rgb(rainbow_single(x, y, offset)))
+    colour_gen(move |x, y| conv_colour(rainbow_single(x, y, offset).to_rgb_rainbow()))
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -98,11 +98,11 @@ fn c_b(x: u8) -> f32 {
     (x as f32) / 255.0
 }
 
-fn blend_hsv(a: Hsv, b: Hsv, t: f32) -> Hsv {
-    Hsv {
-        hue: c_f(lerp_wrap(c_b(a.hue), c_b(b.hue), 1.0, t)),
-        sat: c_f(lerp(c_b(a.sat), c_b(b.sat), t)),
-        val: c_f(lerp(c_b(a.val), c_b(b.val), t)),
+fn blend_hsv(a: HSV, b: HSV, t: f32) -> HSV {
+    HSV {
+        h: c_f(lerp_wrap(c_b(a.h), c_b(b.h), 1.0, t)),
+        s: c_f(lerp(c_b(a.s), c_b(b.s), t)),
+        v: c_f(lerp(c_b(a.v), c_b(b.v), t)),
     }
 }
 
@@ -181,22 +181,18 @@ impl TapWaves {
 
     pub fn render<'s, 'a: 's>(
         &'s self,
-        below: impl Fn(u8, u8) -> Hsv + 'a,
+        below: impl Fn(u8, u8) -> HSV + 'a,
     ) -> impl Iterator<Item = RGB8> + 's {
         colour_gen(move |x, y| {
             let colour = below(x, y);
 
             let b = self.brightness_sums(x, y);
 
-            let white = Hsv {
-                hue: 0,
-                sat: 0,
-                val: 255,
-            };
+            let white = HSV { h: 0, s: 0, v: 255 };
             let colour_out = blend_hsv(colour, white, b);
             // defmt::debug!("in: {:?}, out: {:?}, b: {}", components(colour), components(colour_out), b);
 
-            hsv2rgb(colour_out)
+            conv_colour(colour_out.to_rgb_rainbow())
         })
     }
 }

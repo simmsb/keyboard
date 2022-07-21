@@ -20,7 +20,7 @@ use embassy_nrf::{
     peripherals::{self, TWISPI0, UARTE0},
     twim::{self, Twim},
     uarte::{self, UarteRx, UarteTx},
-    usb::{self, Driver},
+    usb::{self, Driver, PowerUsb},
     Peripherals,
 };
 use embassy_usb::UsbDevice;
@@ -84,7 +84,8 @@ async fn main(spawner: Spawner, p: Peripherals) {
     cortex_p.SCB.enable_icache();
 
     let irq = interrupt::take!(USBD);
-    let usb_driver = usb::Driver::new(p.USBD, irq);
+    let power_irq = interrupt::take!(POWER_CLOCK);
+    let usb_driver = usb::Driver::new(p.USBD, irq, PowerUsb::new(power_irq));
 
     let mut config = embassy_usb::Config::new(0x6969, 0x0420);
     config
@@ -394,7 +395,7 @@ async fn led_task(mut leds: Leds) {
     }
 }
 
-type UsbDriver = Driver<'static, peripherals::USBD>;
+type UsbDriver = Driver<'static, peripherals::USBD, PowerUsb>;
 
 #[embassy::task]
 async fn hid_task(

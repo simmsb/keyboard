@@ -14,7 +14,8 @@ harness = false
 [dependencies]
 alloc-cortex-m = "0.4.2"
 atomic_float = { version = "0.1.0", default-features = false }
-bitvec = { version = "1.0.0", default-features = false }
+bitvec = { version = "1.0.1", default-features = false }
+cichlid = { git = "https://github.com/simmsb/cichlid.git", version = "0.2.1", features = ["no-std", "nightly"] }
 cortex-m = { version = "0.7.5", features = ["linker-plugin-lto", "inline-asm"] }
 cortex-m-rt = "0.7.1"
 critical-section = "0.2.7"
@@ -22,28 +23,45 @@ defmt = "0.3.2"
 defmt-rtt = { version = "0.3.2", optional = true }
 display-interface = { git = "https://github.com/simmsb/display-interface.git", version = "0.4.1" }
 dtoa = "1.0.2"
-embassy = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
-embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote"] }
-embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
-embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
-embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+embassy = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+] }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+  "nrf52840",
+  "time-driver-rtc1",
+  "gpiote",
+] }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+] }
+embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+] }
+embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+] }
 embedded-graphics = "0.7.1"
 embedded-hal-async = "0.1.0-alpha.1"
 embedded-io = "0.3.0"
 embedded-text = { version = "0.5.0", default-features = false }
-futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
-heapless = { version = "0.7.13", features = ["ufmt-write", "ufmt-impl"] }
+futures = { version = "0.3.21", default-features = false, features = [
+  "async-await",
+] }
+heapless = { version = "0.7.15", features = ["ufmt-write", "ufmt-impl"] }
 keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
 keyboard_shared = { version = "0.1.0", path = "../keyboard_shared" }
 micromath = "2.0.0"
-nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = ["52840"] }
+nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = [
+  "52840",
+] }
 num-traits = { version = "0.2.15", default-features = false }
 num_enum = { version = "0.5.7", default-features = false }
 packed_struct = { version = "0.10.0", default-features = false }
 panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
-postcard = "0.7.3"
+postcard = "1.0.1"
 profont = "0.6.1"
-serde = { version = "1.0.137", features = ["derive"], default-features = false }
+serde = { version = "1.0.140", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
 ssd1306 = { git = "https://github.com/simmsb/ssd1306" }
 ufmt = "0.1.0"
@@ -53,9 +71,13 @@ usbd-human-interface-device = "0.2.1"
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
 
 [features]
-nightly = ["embassy/nightly", "embassy/unstable-traits",
-           "embassy-nrf/nightly", "embassy-nrf/unstable-traits", 
-           "embedded-io/async" ]
+nightly = [
+  "embassy/nightly",
+  "embassy/unstable-traits",
+  "embassy-nrf/nightly",
+  "embassy-nrf/unstable-traits",
+  "embedded-io/async",
+]
 # default = ["log-noop", "nightly"]
 default = ["debugger", "nightly"]
 debugger = ["panic-probe", "defmt-rtt"]
@@ -67,8 +89,8 @@ codegen-units = 1
 debug = 2
 debug-assertions = true # <-
 incremental = false
-opt-level = 1 # <-
-overflow-checks = true # <-
+opt-level = 1           # <-
+overflow-checks = true  # <-
 # # cargo test
 # [profile.test]
 # codegen-units = 1
@@ -85,8 +107,8 @@ debug = 1
 debug-assertions = false # <-
 incremental = false
 lto = 'fat'
-opt-level = 3 # <-
-overflow-checks = false # <-
+opt-level = 3            # <-
+overflow-checks = false  # <-
 
 # cargo test --release
 [profile.bench]
@@ -95,11 +117,11 @@ debug = 2
 debug-assertions = false # <-
 incremental = false
 # see comment in the profile.release section
-lto = 'false'
-opt-level = 3 # <-
+lto = false
+opt-level = 3           # <-
 overflow-checks = false # <-
 
 [build-dependencies]
 glob = "0.3.0"
-image = { version = "0.24.2", default-features = false, features = ["png"] }
+image = { version = "0.24.3", default-features = false, features = ["png"] }
 itertools = "0.10.3"

@@ -9,10 +9,7 @@ use embassy::{
 };
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
 use futures::Future;
-use postcard::{
-    flavors::{Cobs, Slice},
-    CobsAccumulator,
-};
+use postcard::accumulator::{CobsAccumulator, FeedResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub use keyboard_shared::*;
@@ -103,9 +100,9 @@ where
 
             'cobs: while !window.is_empty() {
                 window = match accumulator.feed(window) {
-                    postcard::FeedResult::Consumed => break 'cobs,
-                    postcard::FeedResult::OverFull(buf) => buf,
-                    postcard::FeedResult::DeserError(buf) => {
+                    FeedResult::Consumed => break 'cobs,
+                    FeedResult::OverFull(buf) => buf,
+                    FeedResult::DeserError(buf) => {
                         warn!(
                             "Message decoder failed to deserialize a message of type {}: {:?}",
                             core::any::type_name::<CmdOrAck<U>>(),
@@ -113,7 +110,7 @@ where
                         );
                         buf
                     }
-                    postcard::FeedResult::Success { data, remaining } => {
+                    FeedResult::Success { data, remaining } => {
                         let data: CmdOrAck<U> = data;
 
                         match data {
@@ -164,9 +161,7 @@ where
             let val = self.mix_chan.recv().await;
 
             let mut buf = [0u8; BUF_SIZE];
-            if let Ok(buf) =
-                postcard::serialize_with_flavor(&val, Cobs::try_new(Slice::new(&mut buf)).unwrap())
-            {
+            if let Ok(buf) = postcard::to_slice_cobs(&val, &mut buf) {
                 let r = self.tx.write(buf).await;
                 debug!("Transmitted {:?}, r: {:?}", val, r);
             }
