@@ -1,13 +1,13 @@
 use alloc::sync::Arc;
 use core::hash::Hash;
 use defmt::{debug, warn, Format};
-use embassy::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::mpmc::{Channel, Sender},
-    mutex::Mutex,
-    time::{with_timeout, Duration},
-};
 use embassy_nrf::uarte::{Instance, Uarte, UarteRx, UarteTx};
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::{Channel, Sender},
+    mutex::Mutex,
+};
+use embassy_time::{with_timeout, Duration};
 use futures::Future;
 use postcard::accumulator::{CobsAccumulator, FeedResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

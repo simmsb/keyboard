@@ -16,14 +16,16 @@ alloc-cortex-m = "0.4.2"
 atomic_float = { version = "0.1.0", default-features = false }
 bitvec = { version = "1.0.1", default-features = false }
 cichlid = { git = "https://github.com/simmsb/cichlid.git", version = "0.2.1", features = ["no-std", "nightly"] }
-cortex-m = { version = "0.7.5", features = ["linker-plugin-lto", "inline-asm"] }
+cortex-m = { version = "0.7.6", features = ["linker-plugin-lto", "inline-asm", "critical-section-single-core"] }
 cortex-m-rt = "0.7.1"
-critical-section = "0.2.7"
 defmt = "0.3.2"
 defmt-rtt = { version = "0.3.2", optional = true }
 display-interface = { git = "https://github.com/simmsb/display-interface.git", version = "0.4.1" }
-dtoa = "1.0.2"
-embassy = { git = "https://github.com/embassy-rs/embassy", features = [
+dtoa = "1.0.3"
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt", "integrated-timers"
+] }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", features = [
   "defmt",
 ] }
 embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = [
@@ -31,6 +33,12 @@ embassy-nrf = { git = "https://github.com/embassy-rs/embassy", features = [
   "nrf52840",
   "time-driver-rtc1",
   "gpiote",
+] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
+] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", features = [
+  "defmt",
 ] }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [
   "defmt",
@@ -45,10 +53,10 @@ embedded-graphics = "0.7.1"
 embedded-hal-async = "0.1.0-alpha.1"
 embedded-io = "0.3.0"
 embedded-text = { version = "0.5.0", default-features = false }
-futures = { version = "0.3.21", default-features = false, features = [
+futures = { version = "0.3.24", default-features = false, features = [
   "async-await",
 ] }
-heapless = { version = "0.7.15", features = ["ufmt-write", "ufmt-impl"] }
+heapless = { version = "0.7.16", features = ["ufmt-write", "ufmt-impl"] }
 keyberon = { git = "https://github.com/TeXitoi/keyberon", branch = "master" }
 keyboard_shared = { version = "0.1.0", path = "../keyboard_shared" }
 micromath = "2.0.0"
@@ -59,25 +67,20 @@ num-traits = { version = "0.2.15", default-features = false }
 num_enum = { version = "0.5.7", default-features = false }
 packed_struct = { version = "0.10.0", default-features = false }
 panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
-postcard = "1.0.1"
+postcard = "1.0.2"
 profont = "0.6.1"
-serde = { version = "1.0.140", features = ["derive"], default-features = false }
+serde = { version = "1.0.144", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
 ssd1306 = { git = "https://github.com/simmsb/ssd1306" }
-ufmt = "0.1.0"
+static_cell = "1.0.0"
+ufmt = "0.2.0"
 usbd-hid = "0.6.0"
 usbd-human-interface-device = "0.2.1"
 # [patch.crates-io]
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
 
 [features]
-nightly = [
-  "embassy/nightly",
-  "embassy/unstable-traits",
-  "embassy-nrf/nightly",
-  "embassy-nrf/unstable-traits",
-  "embedded-io/async",
-]
+nightly = ["embassy-executor/nightly", "embassy-nrf/nightly", "embassy-nrf/unstable-traits", "embedded-io/async"]
 # default = ["log-noop", "nightly"]
 default = ["debugger", "nightly"]
 debugger = ["panic-probe", "defmt-rtt"]

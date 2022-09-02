@@ -1,5 +1,5 @@
 use cichlid::HSV;
-use embassy_nrf::{gpio::Pin, peripherals::PWM0, Unborrow};
+use embassy_nrf::{gpio::Pin, peripherals::PWM0, Peripheral};
 use keyberon::layout::Event;
 use micromath::F32Ext;
 use nrf_smartled::RGB8;
@@ -202,7 +202,7 @@ pub struct Leds {
 }
 
 impl Leds {
-    pub fn new<P: Pin + Unborrow<Target = P>>(pwm0: PWM0, pin: P) -> Self {
+    pub fn new<P: Pin + Peripheral<P = P>>(pwm0: PWM0, pin: P) -> Self {
         Self {
             pwm: nrf_smartled::pwm::Pwm::new(pwm0, pin),
         }
@@ -213,8 +213,6 @@ impl Leds {
         T: Iterator<Item = I>,
         I: Into<RGB8>,
     {
-        critical_section::with(|_| {
-            let _ = self.pwm.write(gamma(iterator.map(Into::into)));
-        });
+        let _ = self.pwm.write(gamma(iterator.map(Into::into)));
     }
 }

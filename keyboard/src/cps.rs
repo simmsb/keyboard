@@ -1,11 +1,11 @@
 use core::sync::atomic::AtomicU32;
 
 use atomic_float::AtomicF32;
-use embassy::{
+use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
     mutex::Mutex,
-    time::{Duration, Ticker},
 };
+use embassy_time::{Duration, Ticker};
 use futures::StreamExt;
 use heapless::HistoryBuffer;
 
@@ -45,7 +45,7 @@ impl Cps {
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 pub async fn cps_task(mut cps: Cps) {
     let mut ticker = Ticker::every(CPS_RATE);
 

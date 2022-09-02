@@ -1,4 +1,4 @@
-use embassy::channel::signal::Signal;
+use embassy_sync::signal::Signal;
 
 pub struct Event(Signal<()>);
 

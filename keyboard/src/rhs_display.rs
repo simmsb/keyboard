@@ -2,14 +2,10 @@ use core::sync::atomic::AtomicU32;
 
 use atomic_float::AtomicF32;
 use bitvec::{order::Lsb0, view::BitView};
-use embassy::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::mpmc::Channel,
-    mutex::Mutex,
-    time::{Duration, Instant, Ticker},
-    util::{select, select3},
-};
+use embassy_futures::select::{select, select3, Either3};
 use embassy_nrf::peripherals::TWISPI0;
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel, mutex::Mutex};
+use embassy_time::{Duration, Instant, Ticker};
 use embedded_graphics::{
     mono_font::MonoTextStyle,
     pixelcolor::BinaryColor,
@@ -81,9 +77,9 @@ impl RHSDisplay {
             )
             .await
             {
-                embassy::util::Either3::First(()) => {}
-                embassy::util::Either3::Second(()) => {}
-                embassy::util::Either3::Third(o) => {
+                Either3::First(()) => {}
+                Either3::Second(()) => {}
+                Either3::Third(o) => {
                     self.read_in_overrides(o).await;
                     override_timeout = Some(Instant::now() + Duration::from_secs(1));
                 }

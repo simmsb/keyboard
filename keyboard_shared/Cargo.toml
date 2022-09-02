@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-defmt = "0.3.2"
-fnv = { version = "1.0.7", default-features = false }
-serde = { version = "1.0.137", features = ["derive"], default-features = false }
+defmt = "0.3"
+fnv = { version = "1.0", default-features = false }
+serde = { version = "1.0", features = ["derive"], default-features = false }

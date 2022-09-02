@@ -6,14 +6,8 @@
 use core::sync::atomic::AtomicU32;
 
 use defmt::debug;
-use embassy::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::mpmc::{Channel, Receiver},
-    executor::Spawner,
-    mutex::Mutex,
-    time::{Duration, Ticker, Timer},
-    util::select3,
-};
+use embassy_executor::Spawner;
+use embassy_futures::select::select3;
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt, pac,
@@ -21,8 +15,13 @@ use embassy_nrf::{
     twim::{self, Twim},
     uarte::{self, UarteRx, UarteTx},
     usb::{self, Driver, PowerUsb},
-    Peripherals,
 };
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::{Channel, Receiver},
+    mutex::Mutex,
+};
+use embassy_time::{Duration, Ticker, Timer};
 use embassy_usb::UsbDevice;
 use embassy_usb_hid::HidWriter;
 use embassy_usb_serial::CdcAcmClass;
@@ -68,8 +67,10 @@ impl<T, const N: usize> StaticLen for [T; N] {
     const LEN: usize = N;
 }
 
-#[embassy::main]
-async fn main(spawner: Spawner, p: Peripherals) {
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    let p = embassy_nrf::init(Default::default());
+
     init_heap();
 
     let clock: pac::CLOCK = unsafe { core::mem::transmute(()) };
@@ -216,7 +217,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner.spawn(sync_kp_task()).unwrap();
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
     Timer::after(Duration::from_millis(100)).await;
     {
@@ -228,12 +229,12 @@ async fn oled_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI
     display.run().await;
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
     display_timeout_task(oled).await;
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn sync_kp_task() {
     Timer::after(Duration::from_millis(1000)).await;
     let mut ticker = Ticker::every(Duration::from_millis(100));
@@ -260,26 +261,26 @@ async fn sync_kp_task() {
 
 type EventerA = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_a(f: EventerA) {
     f.await;
 }
 
 type EventerB = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_b(f: EventerB) {
     f.await;
 }
 
 type EventerC = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_c(f: EventerC) {
     f.await;
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, SubToDom, 16>) {
     loop {
         let event = events_in.recv().await;
@@ -290,7 +291,7 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, SubTo
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     let mut last_report = None;
     loop {
@@ -313,7 +314,7 @@ async fn layout_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>) {
     loop {
         let event = PROCESSED_KEY_CHAN.recv().await;
@@ -336,7 +337,7 @@ async fn keyboard_event_task(layout: &'static Mutex<ThreadModeRawMutex, Layout>)
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn keyboard_poll_task(
     mut matrix: Matrix<Input<'static, AnyPin>, Output<'static, AnyPin>, COLS_PER_SIDE, ROWS>,
     mut debouncer: Debouncer<[[bool; COLS_PER_SIDE]; ROWS]>,
@@ -366,7 +367,7 @@ async fn keyboard_poll_task(
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();
@@ -397,7 +398,7 @@ async fn led_task(mut leds: Leds) {
 
 type UsbDriver = Driver<'static, peripherals::USBD, PowerUsb>;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn hid_task(
     mut hid: HidWriter<
         'static,
@@ -411,7 +412,7 @@ async fn hid_task(
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
     loop {
         let in_chan: &mut Channel<ThreadModeRawMutex, u8, 128> = forever!(Channel::new());
@@ -477,7 +478,7 @@ async fn usb_serial_task(mut class: CdcAcmClass<'static, UsbDriver>) {
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn usb_task(mut device: UsbDevice<'static, UsbDriver>) {
     device.run().await;
 }

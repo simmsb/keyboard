@@ -5,21 +5,20 @@
 use core::sync::atomic::AtomicU16;
 
 use defmt::debug;
-use embassy::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::mpmc::{Channel, Receiver},
-    executor::Spawner,
-    mutex::Mutex,
-    time::{Duration, Ticker, Timer},
-};
+use embassy_executor::Spawner;
 use embassy_nrf::{
     gpio::{AnyPin, Input, Output},
     interrupt,
     peripherals::{TWISPI0, UARTE0},
     twim::{self, Twim},
     uarte::{self, UarteRx, UarteTx},
-    Peripherals,
 };
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::{Channel, Receiver},
+    mutex::Mutex,
+};
+use embassy_time::{Duration, Ticker, Timer};
 use futures::{Future, StreamExt};
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
@@ -46,8 +45,10 @@ static COMMAND_CHAN: Channel<ThreadModeRawMutex, (SubToDom, Duration), 4> = Chan
 
 static LED_COUNTER_TARGET: AtomicU16 = AtomicU16::new(0);
 
-#[embassy::main]
-async fn main(spawner: Spawner, p: Peripherals) {
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    let p = embassy_nrf::init(Default::default());
+
     init_heap();
 
     let mut cortex_p = cortex_m::Peripherals::take().unwrap();
@@ -112,7 +113,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
     spawner.spawn(eventer_c(e_c)).unwrap();
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn oled_task(
     oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>,
     cpm_samples: &'static Mutex<ThreadModeRawMutex, SampleBuffer>,
@@ -127,33 +128,33 @@ async fn oled_task(
     display.run().await;
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn oled_timeout_task(oled: &'static Mutex<ThreadModeRawMutex, Oled<'static, TWISPI0>>) {
     display_timeout_task(oled).await;
 }
 
 type EventerA = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_a(f: EventerA) {
     f.await;
 }
 
 type EventerB = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_b(f: EventerB) {
     f.await;
 }
 
 type EventerC = impl Future + 'static;
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn eventer_c(f: EventerC) {
     f.await;
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomToSub, 16>) {
     loop {
         let event = events_in.recv().await;
@@ -190,7 +191,7 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn keyboard_poll_task(
     mut matrix: Matrix<Input<'static, AnyPin>, Output<'static, AnyPin>, 6, 4>,
     mut debouncer: Debouncer<[[bool; 6]; 4]>,
@@ -230,7 +231,7 @@ async fn keyboard_poll_task(
     }
 }
 
-#[embassy::task]
+#[embassy_executor::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();

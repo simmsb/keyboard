@@ -25,7 +25,7 @@ use alloc_cortex_m::CortexMHeap;
 
 #[cfg(feature = "debugger")]
 use defmt_rtt as _;
-use embassy::time::Duration;
+use embassy_time::Duration;
 use embassy_nrf::uarte;
 // global logger
 #[cfg(feature = "debugger")]
@@ -42,8 +42,8 @@ mod defmt_noop;
 macro_rules! forever {
     ($val:expr) => {{
         type T = impl ::core::marker::Sized;
-        static FOREVER: ::embassy::util::Forever<T> = ::embassy::util::Forever::new();
-        FOREVER.put($val)
+        static FOREVER: ::static_cell::StaticCell<T> = ::static_cell::StaticCell::new();
+        FOREVER.init($val)
     }};
 }
 
@@ -67,32 +67,3 @@ pub fn init_heap() {
 fn oom(_: Layout) -> ! {
     panic!("oom");
 }
-
-// // same panicking *behavior* as `panic-probe` but doesn't print a panic message
-// // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
-// #[cfg(feature = "debugger")]
-// #[defmt::panic_handler]
-// fn panic() -> ! {
-//     cortex_m::asm::udf()
-// }
-
-// /// Terminates the application and makes `probe-run` exit with exit-code = 0
-// pub fn exit() -> ! {
-//     loop {
-//         cortex_m::asm::bkpt();
-//     }
-// }
-
-// // defmt-test 0.3.0 has the limitation that this `#[tests]` attribute can only be used
-// // once within a crate. the module can be in any file but there can only be at most
-// // one `#[tests]` module in this library crate
-// #[cfg(test)]
-// #[defmt_test::tests]
-// mod unit_tests {
-//     use defmt::assert;
-
-//     #[test]
-//     fn it_works() {
-//         assert!(true)
-//     }
-// }

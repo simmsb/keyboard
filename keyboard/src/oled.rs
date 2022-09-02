@@ -1,12 +1,9 @@
 use defmt::debug;
 use display_interface::DisplayError;
-use embassy::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    mutex::Mutex,
-    time::{Duration, Timer},
-    util::select,
-};
+use embassy_futures::select::select;
 use embassy_nrf::twim::{Instance, Twim};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
+use embassy_time::{Duration, Timer};
 use embedded_hal_async::i2c::I2c;
 use ssd1306::{
     mode::{BufferedGraphicsMode, DisplayConfig},
@@ -62,10 +59,7 @@ impl<'a, T: Instance> Oled<'a, T> {
         self.display.flush().await
     }
 
-    pub fn draw_no_clear_no_flush(
-        &mut self,
-        f: impl FnOnce(&mut OledDisplay<'a, T>),
-    ) {
+    pub fn draw_no_clear_no_flush(&mut self, f: impl FnOnce(&mut OledDisplay<'a, T>)) {
         f(&mut self.display);
     }
 

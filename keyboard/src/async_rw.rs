@@ -1,6 +1,7 @@
 use defmt::debug;
-use embassy::{blocking_mutex::raw::ThreadModeRawMutex, channel::mpmc::Channel};
+use embassy_futures::select::select;
 use embassy_nrf::uarte::{self, UarteRx, UarteTx};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_usb::driver::{Driver, EndpointError};
 use embassy_usb_serial::CdcAcmClass;
 use futures::Future;
@@ -132,14 +133,14 @@ impl<'a, 'd, D: Driver<'d>, const N: usize> UsbSerialWrapper<'a, 'd, D, N> {
                 Ok(heapless::Vec::<u8, N>::from_slice(&v[..n]).unwrap())
             };
 
-            match embassy::util::select(a, b).await {
-                embassy::util::Either::First(to_pc) => {
+            match select(a, b).await {
+                embassy_futures::select::Either::First(to_pc) => {
                     self.class.write_packet(&to_pc).await?;
                     if to_pc.len() as u16 == self.class.max_packet_size() {
                         self.class.write_packet(&[]).await?;
                     }
                 }
-                embassy::util::Either::Second(from_pc) => {
+                embassy_futures::select::Either::Second(from_pc) => {
                     let from_pc = from_pc?;
                     for b in from_pc {
                         self.out_chan.send(b).await;
