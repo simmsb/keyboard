@@ -12,16 +12,16 @@ harness = false
 # harness = false
 
 [dependencies]
-alloc-cortex-m = "0.4.2"
+alloc-cortex-m = "0.4.4"
 atomic_float = { version = "0.1.0", default-features = false }
 bitvec = { version = "1.0.1", default-features = false }
 cichlid = { git = "https://github.com/simmsb/cichlid.git", version = "0.2.1", features = ["no-std", "nightly"] }
-cortex-m = { version = "0.7.6", features = ["linker-plugin-lto", "inline-asm", "critical-section-single-core"] }
-cortex-m-rt = "0.7.1"
+cortex-m = { version = "0.7.7", features = ["linker-plugin-lto", "inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.2"
 defmt = "0.3.2"
-defmt-rtt = { version = "0.3.2", optional = true }
-display-interface = { git = "https://github.com/simmsb/display-interface.git", version = "0.4.1" }
-dtoa = "1.0.3"
+defmt-rtt = { version = "0.4.0", optional = true }
+display-interface = { git = "https://github.com/simmsb/display-interface.git" }
+dtoa = "1.0.5"
 embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = [
   "defmt", "integrated-timers"
 ] }
@@ -43,17 +43,11 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy", features = [
 embassy-usb = { git = "https://github.com/embassy-rs/embassy", features = [
   "defmt",
 ] }
-embassy-usb-hid = { git = "https://github.com/embassy-rs/embassy", features = [
-  "defmt",
-] }
-embassy-usb-serial = { git = "https://github.com/embassy-rs/embassy", features = [
-  "defmt",
-] }
 embedded-graphics = "0.7.1"
-embedded-hal-async = "0.1.0-alpha.1"
-embedded-io = "0.3.0"
+embedded-hal-async = "0.2.0-alpha.0"
+embedded-io = "0.4"
 embedded-text = { version = "0.5.0", default-features = false }
-futures = { version = "0.3.24", default-features = false, features = [
+futures = { version = "0.3.26", default-features = false, features = [
   "async-await",
 ] }
 heapless = { version = "0.7.16", features = ["ufmt-write", "ufmt-impl"] }
@@ -64,18 +58,19 @@ nrf-smartled = { git = "https://github.com/simmsb/nrf-smartled", features = [
   "52840",
 ] }
 num-traits = { version = "0.2.15", default-features = false }
-num_enum = { version = "0.5.7", default-features = false }
-packed_struct = { version = "0.10.0", default-features = false }
+num_enum = { version = "0.5.9", default-features = false }
+packed_struct = { version = "0.10.1", default-features = false }
 panic-probe = { version = "0.3.0", features = ["print-defmt"], optional = true }
+panic-reset = { version = "0.1.1", optional = true }
 postcard = "1.0.2"
 profont = "0.6.1"
-serde = { version = "1.0.144", features = ["derive"], default-features = false }
+serde = { version = "1.0.152", features = ["derive"], default-features = false }
 smart-leds = "0.3.0"
 ssd1306 = { git = "https://github.com/simmsb/ssd1306" }
 static_cell = "1.0.0"
 ufmt = "0.2.0"
-usbd-hid = "0.6.0"
-usbd-human-interface-device = "0.2.1"
+usbd-hid = "0.6.1"
+usbd-human-interface-device = "0.3.1"
 # [patch.crates-io]
 # cortex-m-rt = { git = "https://github.com/rust-embedded/cortex-m", features = ["set-vtor"], branch = "master" }
 
@@ -84,6 +79,7 @@ nightly = ["embassy-executor/nightly", "embassy-nrf/nightly", "embassy-nrf/unsta
 # default = ["log-noop", "nightly"]
 default = ["debugger", "nightly"]
 debugger = ["panic-probe", "defmt-rtt"]
+release = ["nightly", "panic-reset", "log-noop"]
 log-noop = []
 
 # cargo build/run
@@ -125,6 +121,6 @@ opt-level = 3           # <-
 overflow-checks = false # <-
 
 [build-dependencies]
-glob = "0.3.0"
-image = { version = "0.24.3", default-features = false, features = ["png"] }
-itertools = "0.10.3"
+glob = "0.3.1"
+image = { version = "0.24.5", default-features = false, features = ["png"] }
+itertools = "0.10.5"

@@ -1,6 +1,6 @@
 use embassy_sync::signal::Signal;
 
-pub struct Event(Signal<()>);
+pub struct Event(Signal<embassy_sync::blocking_mutex::raw::ThreadModeRawMutex, ()>);
 
 impl Event {
     pub const fn new() -> Self {

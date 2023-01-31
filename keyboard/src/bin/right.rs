@@ -1,6 +1,6 @@
 #![no_main]
 #![no_std]
-#![feature(type_alias_impl_trait, mixed_integer_ops)]
+#![feature(type_alias_impl_trait)]
 
 use core::sync::atomic::AtomicU16;
 
@@ -27,7 +27,7 @@ use keyboard_thing::{
     forever, init_heap,
     layout::{COLS_PER_SIDE, ROWS},
     leds::{rainbow_single, Leds, TapWaves},
-    messages::{DomToSub, Eventer, SubToDom},
+    messages::{DomToSub, Eventer, SubToDom, KeyLocation},
     oled::{display_timeout_task, interacted, Oled},
     rhs_display::{
         self, DisplayOverride, RHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES,
@@ -37,6 +37,7 @@ use keyboard_thing::{
 };
 use micromath::F32Ext;
 
+static OTHERSIDE_LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, KeyLocation, 16> = Channel::new();
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channels that receive each debounced key press
 static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
@@ -187,6 +188,9 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, DomTo
                     .await;
                 interacted();
             }
+            DomToSub::KeyPressed(v) => {
+                OTHERSIDE_LED_KEY_LISTEN_CHAN.send(v).await;
+            }
         }
     }
 }
@@ -240,7 +244,17 @@ async fn led_task(mut leds: Leds) {
 
     loop {
         while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
-            tapwaves.update(event);
+            if event.is_press() {
+                let (x, y) = event.coord();
+                tapwaves.update(x, y);
+            }
+        }
+
+        while let Ok(loc) = OTHERSIDE_LED_KEY_LISTEN_CHAN.try_recv() {
+            let (x, y) = loc.unpack();
+            let y = 11 - y;
+
+            tapwaves.update(x, y);
         }
 
         tapwaves.tick();

@@ -3,86 +3,60 @@ use embassy_futures::select::select;
 use embassy_nrf::uarte::{self, UarteRx, UarteTx};
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_usb::driver::{Driver, EndpointError};
-use embassy_usb_serial::CdcAcmClass;
+use embassy_usb::class::cdc_acm::CdcAcmClass;
 use futures::Future;
 
 pub trait AsyncRead {
     type Error;
-    type Fut<'a>: Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a>;
+    async fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Result<(), Self::Error>;
 }
 
 pub trait AsyncWrite {
     type Error;
-    type Fut<'a>: Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
 
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::Fut<'a>;
+    async fn write<'a>(&'a mut self, buf: &'a [u8]) -> Result<(), Self::Error>;
 }
 
 impl<'d, T: uarte::Instance> AsyncRead for UarteRx<'d, T> {
     type Error = uarte::Error;
 
-    type Fut<'a> = impl Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
-
     #[inline]
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a> {
-        UarteRx::read(self, buf)
+    async fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Result<(), Self::Error> {
+        UarteRx::read(self, buf).await
     }
 }
 
 impl<'d, T: uarte::Instance> AsyncWrite for UarteTx<'d, T> {
     type Error = uarte::Error;
 
-    type Fut<'a> = impl Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
-
     #[inline]
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::Fut<'a> {
-        UarteTx::write(self, buf)
+    async fn write<'a>(&'a mut self, buf: &'a [u8]) -> Result<(), Self::Error> {
+        UarteTx::write(self, buf).await
     }
 }
 
 impl<const N: usize> AsyncRead for &Channel<ThreadModeRawMutex, u8, N> {
     type Error = ();
 
-    type Fut<'a> = impl Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
-
     #[inline]
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::Fut<'a> {
-        async {
-            for p in buf.iter_mut() {
-                *p = self.recv().await;
-            }
-            Ok(())
+    async fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Result<(), Self::Error> {
+        for p in buf.iter_mut() {
+            *p = self.recv().await;
         }
+        Ok(())
     }
 }
 
 impl<const N: usize> AsyncWrite for &Channel<ThreadModeRawMutex, u8, N> {
     type Error = ();
 
-    type Fut<'a> = impl Future<Output = Result<(), Self::Error>>
-    where
-        Self: 'a;
-
     #[inline]
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::Fut<'a> {
-        async move {
-            for b in buf {
-                self.send(*b).await;
-            }
-            Ok(())
+    async fn write<'a>(&'a mut self, buf: &'a [u8]) -> Result<(), Self::Error> {
+        for b in buf {
+            self.send(*b).await;
         }
+        Ok(())
     }
 }
 

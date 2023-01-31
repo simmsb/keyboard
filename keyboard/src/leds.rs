@@ -1,4 +1,5 @@
 use cichlid::HSV;
+use defmt::debug;
 use embassy_nrf::{gpio::Pin, peripherals::PWM0, Peripheral};
 use keyberon::layout::Event;
 use micromath::F32Ext;
@@ -108,7 +109,7 @@ fn blend_hsv(a: HSV, b: HSV, t: f32) -> HSV {
 
 #[derive(Default)]
 pub struct TapWaves {
-    matrix: [[u8; ROWS]; COLS_PER_SIDE],
+    matrix: [[u8; ROWS]; COLS_PER_SIDE * 2],
 }
 
 impl TapWaves {
@@ -132,18 +133,15 @@ impl TapWaves {
         }
     }
 
-    pub fn update(&mut self, event: Event) {
-        if !event.is_press() {
-            return;
-        }
-
-        let (x, y) = event.coord();
+    pub fn update(&mut self, x: u8, y: u8) {
         if let Some(v) = self
             .matrix
             .get_mut(y as usize)
             .and_then(|col| col.get_mut(x as usize))
         {
             *v = 1;
+        } else {
+            debug!("LedWaves couldn't track {}, {}", x, y);
         }
     }
 

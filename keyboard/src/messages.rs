@@ -19,6 +19,20 @@ use crate::{
     event::Event,
 };
 
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Format, Hash, Copy, Clone)]
+pub struct KeyLocation(u8);
+
+impl KeyLocation {
+    pub fn unpack(self) -> (u8, u8) {
+        ((self.0 >> 4) & 0xf, self.0 & 0xf)
+    }
+
+    pub fn pack(x: u8, y: u8) -> Self {
+        Self(((x & 0xf) << 4) | (y & 0xf))
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Format, Hash, Clone)]
 pub enum DomToSub {
     ResyncLeds(u16),
@@ -29,32 +43,35 @@ pub enum DomToSub {
         data_0: [u8; 4],
         data_1: [u8; 4],
     },
+    KeyPressed(KeyLocation),
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Format, Hash, Clone)]
 pub enum SubToDom {
-    KeyPressed(u8),
-    KeyReleased(u8),
+    KeyPressed(KeyLocation),
+    KeyReleased(KeyLocation),
 }
 
 impl SubToDom {
     pub fn as_keyberon_event(&self) -> Option<keyberon::layout::Event> {
         match self {
             SubToDom::KeyPressed(v) => {
-                Some(keyberon::layout::Event::Press((v >> 4) & 0xf, v & 0xf))
+                let (x, y) = v.unpack();
+                Some(keyberon::layout::Event::Press(x, y))
             }
             SubToDom::KeyReleased(v) => {
-                Some(keyberon::layout::Event::Release((v >> 4) & 0xf, v & 0xf))
+                let (x, y) = v.unpack();
+                Some(keyberon::layout::Event::Release(x, y))
             }
         }
     }
 
     pub fn key_pressed(x: u8, y: u8) -> Self {
-        Self::KeyPressed(((x & 0xf) << 4) | (y & 0xf))
+        Self::KeyPressed(KeyLocation::pack(x, y))
     }
 
     pub fn key_released(x: u8, y: u8) -> Self {
-        Self::KeyReleased(((x & 0xf) << 4) | (y & 0xf))
+        Self::KeyReleased(KeyLocation::pack(x, y))
     }
 }
 

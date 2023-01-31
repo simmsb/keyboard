@@ -1,7 +1,6 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
-#![feature(generic_associated_types)]
 
 use core::sync::atomic::AtomicU32;
 
@@ -22,9 +21,9 @@ use embassy_sync::{
     mutex::Mutex,
 };
 use embassy_time::{Duration, Ticker, Timer};
+use embassy_usb::class::cdc_acm::CdcAcmClass;
+use embassy_usb::class::hid::HidWriter;
 use embassy_usb::UsbDevice;
-use embassy_usb_hid::HidWriter;
-use embassy_usb_serial::CdcAcmClass;
 use futures::{Future, StreamExt};
 use keyberon::{chording::Chording, debounce::Debouncer, layout::Event, matrix::Matrix};
 use keyboard_thing::{
@@ -37,7 +36,7 @@ use keyboard_thing::{
     lhs_display::{
         self, DisplayOverride, LHSDisplay, AVERAGE_KEYPRESSES, KEYPRESS_EVENT, TOTAL_KEYPRESSES,
     },
-    messages::{DomToSub, Eventer, HostToKeyboard, KeyboardToHost, SubToDom},
+    messages::{DomToSub, Eventer, HostToKeyboard, KeyLocation, KeyboardToHost, SubToDom},
     oled::{display_timeout_task, interacted, Oled},
     wrapping_id::WrappingID,
     DEBOUNCER_TICKS, POLL_PERIOD, UART_BAUD,
@@ -48,10 +47,13 @@ use usbd_human_interface_device::{device::keyboard::NKROBootKeyboardReport, page
 
 static TOTAL_LHS_KEYPRESSES: AtomicU32 = AtomicU32::new(0);
 
+static OTHERSIDE_LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, KeyLocation, 16> = Channel::new();
 static LED_KEY_LISTEN_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
+static OTHERSIDE_KEY_TRANSMIT_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 
 /// Channels that receive each debounced key press
-static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] = &[&LED_KEY_LISTEN_CHAN];
+static KEY_EVENT_CHANS: &[&Channel<ThreadModeRawMutex, Event, 16>] =
+    &[&LED_KEY_LISTEN_CHAN, &OTHERSIDE_KEY_TRANSMIT_CHAN];
 /// Key events that have been chorded or received from the other side
 static PROCESSED_KEY_CHAN: Channel<ThreadModeRawMutex, Event, 16> = Channel::new();
 /// Channel HID events are put on to be sent to the computer
@@ -100,14 +102,15 @@ async fn main(spawner: Spawner) {
         .replace(core::option_env!("USB_SERIAL").unwrap_or("1"));
     config.max_power = 500;
     config.max_packet_size_0 = 64;
+    config.supports_remote_wakeup = true;
 
     struct Resources {
         device_descriptor: [u8; 256],
         config_descriptor: [u8; 256],
         bos_descriptor: [u8; 256],
         control_buf: [u8; 128],
-        serial_state: embassy_usb_serial::State<'static>,
-        usb_state: embassy_usb_hid::State<'static>,
+        serial_state: embassy_usb::class::cdc_acm::State<'static>,
+        usb_state: embassy_usb::class::hid::State<'static>,
     }
 
     let res: &mut Resources = forever!(Resources {
@@ -115,8 +118,8 @@ async fn main(spawner: Spawner) {
         config_descriptor: [0; 256],
         bos_descriptor: [0; 256],
         control_buf: [0; 128],
-        serial_state: embassy_usb_serial::State::new(),
-        usb_state: embassy_usb_hid::State::new(),
+        serial_state: embassy_usb::class::cdc_acm::State::new(),
+        usb_state: embassy_usb::class::hid::State::new(),
     });
 
     let mut builder = embassy_usb::Builder::new(
@@ -131,7 +134,7 @@ async fn main(spawner: Spawner) {
 
     let serial_class = CdcAcmClass::new(&mut builder, &mut res.serial_state, 64);
 
-    let hid_config = embassy_usb_hid::Config {
+    let hid_config = embassy_usb::class::hid::Config {
         report_descriptor:
             usbd_human_interface_device::device::keyboard::NKRO_BOOT_KEYBOARD_REPORT_DESCRIPTOR,
         request_handler: None,
@@ -202,6 +205,7 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(oled_task(oled)).unwrap();
     spawner.spawn(oled_timeout_task(oled)).unwrap();
+    spawner.spawn(otherside_key_transmit_task()).unwrap();
     spawner.spawn(led_task(leds)).unwrap();
     spawner
         .spawn(keyboard_poll_task(matrix, debouncer, chording))
@@ -287,6 +291,13 @@ async fn read_events_task(events_in: Receiver<'static, ThreadModeRawMutex, SubTo
         if let Some(event) = event.as_keyberon_event() {
             // events from the other side are already debounced and chord-resolved
             PROCESSED_KEY_CHAN.send(event).await;
+
+            if event.is_press() {
+                let (x, y) = event.coord();
+                OTHERSIDE_LED_KEY_LISTEN_CHAN
+                    .send(KeyLocation::pack(x, y))
+                    .await;
+            }
         }
     }
 }
@@ -368,6 +379,22 @@ async fn keyboard_poll_task(
 }
 
 #[embassy_executor::task]
+async fn otherside_key_transmit_task() {
+    loop {
+        let evt = OTHERSIDE_KEY_TRANSMIT_CHAN.recv().await;
+        if evt.is_press() {
+            let (x, y) = evt.coord();
+            COMMAND_CHAN
+                .send((
+                    DomToSub::KeyPressed(KeyLocation::pack(x, y)),
+                    Duration::from_millis(2),
+                ))
+                .await;
+        }
+    }
+}
+
+#[embassy_executor::task]
 async fn led_task(mut leds: Leds) {
     let fps = 30;
     let mut tapwaves = TapWaves::new();
@@ -376,7 +403,16 @@ async fn led_task(mut leds: Leds) {
 
     loop {
         while let Ok(event) = LED_KEY_LISTEN_CHAN.try_recv() {
-            tapwaves.update(event);
+            if event.is_press() {
+                let (x, y) = event.coord();
+                tapwaves.update(x, y);
+            }
+        }
+
+        while let Ok(loc) = OTHERSIDE_LED_KEY_LISTEN_CHAN.try_recv() {
+            let (x, y) = loc.unpack();
+
+            tapwaves.update(x, y);
         }
 
         tapwaves.tick();

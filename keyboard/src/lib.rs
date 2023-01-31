@@ -1,9 +1,9 @@
 #![no_main]
 #![no_std]
 #![feature(type_alias_impl_trait)]
-#![feature(generic_associated_types)]
 #![feature(alloc_error_handler)]
-#![feature(mixed_integer_ops)]
+#![feature(async_fn_in_trait)]
+#![feature(impl_trait_projections)]
 
 extern crate alloc;
 
@@ -47,11 +47,8 @@ macro_rules! forever {
     }};
 }
 
-#[cfg(not(feature = "debugger"))]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    cortex_m::asm::udf()
-}
+#[cfg(feature = "panic-reset")]
+use panic_reset as _;
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
