@@ -13,8 +13,19 @@ the one not part of the group of three pins in a line)
 
 ## Flashing
 
-~~I have some scripts in [here](justfile) for generating UF2 files that can be
-used to flash the nice!nanos, there's no need for a debugger.~~
+It's possible to create uf2 files for rust firmware by using the following `memory.x`:
 
-I never figured out how to make a flashable UF2 when using embassy, you'll want
-a st-link/j-link to flash the nice!nanos.
+```
+MEMORY
+{
+  /* NOTE 1 K = 1 KiBi = 1024 bytes */
+  FLASH : ORIGIN = 0x00026000, LENGTH = 868K
+  RAM : ORIGIN = 0x20020000, LENGTH = 128K
+}
+```
+
+You can then use my fork of elf2uf2-rs to convert to uf2: https://github.com/simmsb/elf2uf2-rs
+
+`elf2uf2-rs target/thumbv7em-none-eabihf/release/left left.uf2`
+
+Make sure the softdevice hasn't been wiped from the nice!nano (you can just reflash it if it has)
